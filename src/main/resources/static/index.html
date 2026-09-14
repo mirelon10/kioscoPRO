@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema Kiosco Pro</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" class="login-wrapper">
+  <div class="login-card">
+    <div class="login-header">
+      <i class="fa-solid fa-store"></i>
+      <h2>Mi Kiosco Pro</h2>
+    </div>
+    <form id="form-login">
+      <div class="input-group">
+        <i class="fa-solid fa-user"></i>
+        <input type="email" id="login-email" placeholder="Correo electrónico" required>
+      </div>
+      <div class="input-group">
+        <i class="fa-solid fa-lock"></i>
+        <input type="password" id="login-password" placeholder="Contraseña" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Ingresar al Sistema</button>
+    </form>
+  </div>
+</div>
+
+<!-- APP PRINCIPAL -->
+<div id="app-screen" class="app-container hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <i class="fa-solid fa-cash-register"></i>
+      <span>Mi Kiosco</span>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" data-target="sec-pos"><i class="fa-solid fa-cart-shopping"></i> Ventas (POS)</button>
+      <button class="nav-btn" data-target="sec-turnos"><i class="fa-solid fa-vault"></i> Caja y Turnos</button>
+      <button class="nav-btn" data-target="sec-egresos"><i class="fa-solid fa-money-bill-transfer"></i> Egresos</button>
+      <button class="nav-btn hidden" id="nav-admin" data-target="sec-admin"><i class="fa-solid fa-chart-line"></i> Administración</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <i class="fa-solid fa-circle-user"></i>
+        <span id="user-display">Usuario</span>
+      </div>
+      <button id="btn-logout" class="btn btn-danger btn-block"><i class="fa-solid fa-power-off"></i> Salir</button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- SECCIÓN 1: POS / VENTAS -->
+    <section id="sec-pos" class="view-section active">
+      <div class="pos-layout">
+        <div class="pos-catalog">
+          <h2 class="mb-3">Ingreso de Productos</h2>
+          <div class="search-container">
+            <i class="fa-solid fa-barcode search-icon"></i>
+            <input type="text" id="buscador-pos" placeholder="Escanear código o escribir nombre (ENTER)..." autocomplete="off">
+            <div id="sugerencias-pos" class="autocomplete-items hidden"></div>
+          </div>
+        </div>
+        <div class="pos-cart-panel">
+          <h3 class="panel-title"><i class="fa-solid fa-basket-shopping"></i> Carrito de Venta</h3>
+          <div id="carrito-items" class="cart-items-container">
+            <p class="empty-cart-msg">El carrito está vacío</p>
+          </div>
+          <!-- Dentro de la sección POS (en el panel del carrito) -->
+          <div class="cart-summary">
+            <div class="total-row">
+              <span>Total Carrito:</span>
+              <span id="cart-total" class="total-amount">$0.00</span>
+            </div>
+
+            <select id="select-metodo-pago" class="input-modern mb-2">
+              <option value="Efectivo">💵 Efectivo</option>
+              <option value="Mercado Pago">📱 Mercado Pago</option>
+              <option value="Tarjeta">💳 Tarjeta</option>
+            </select>
+
+            <button id="btn-confirmar-venta" class="btn btn-success btn-block btn-lg mb-3">
+              <i class="fa-solid fa-check-double"></i> Cobrar Venta
+            </button>
+
+            <!-- SECCIÓN DE RECARGA SUBE -->
+            <div class="sube-box" style="border-top: 2px dashed #cbd5e1; padding-top: 15px; margin-top: 10px;">
+              <h4 style="font-size: 1rem; margin-bottom: 8px; color: #1e293b;"><i class="fa-solid fa-bus"></i> Recarga SUBE</h4>
+              <div style="display: flex; gap: 10px;">
+                <input type="number" id="input-monto-sube" placeholder="Monto SUBE $" class="input-modern" step="0.50" style="flex: 1;">
+                <button id="btn-cobrar-sube" class="btn btn-primary" style="background: #0284c7;"><i class="fa-solid fa-plus"></i> Cargar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- SECCIÓN 2: CAJA Y TURNOS -->
+    <section id="sec-turnos" class="view-section hidden">
+      <div class="section-header"><h2>Gestión de Caja</h2></div>
+      <div class="card card-centered">
+        <div id="vista-abrir-turno" class="turno-view hidden">
+          <div class="status-icon text-danger"><i class="fa-solid fa-lock"></i></div>
+          <h3>Caja Cerrada</h3>
+          <input type="number" id="cajaInicialApp" placeholder="Dinero en caja $" class="input-modern input-lg mt-3">
+          <button id="btn-abrir-turno-app" class="btn btn-success btn-lg mt-3">Abrir Turno</button>
+        </div>
+        <div id="vista-cerrar-turno" class="turno-view hidden">
+          <div class="status-icon text-success"><i class="fa-solid fa-lock-open"></i></div>
+          <h3>Turno en Curso</h3>
+          <p id="txt-fecha-apertura" class="text-muted"></p>
+          <input type="number" id="cajaFinalApp" placeholder="Monto Final $" class="input-modern input-lg mt-3">
+          <button id="btn-cerrar-turno-app" class="btn btn-warning btn-lg mt-3">Cerrar Turno</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECCIÓN 3: EGRESOS (HISTORIAL INDEPENDIENTE) -->
+    <section id="sec-egresos" class="view-section hidden">
+      <div class="section-header"><h2>Registro e Historial de Egresos</h2></div>
+      <div class="card mb-4">
+        <form id="form-egreso-app" class="form-inline">
+          <input type="text" id="egreso-motivo" placeholder="Motivo (Ej: Pago a proveedor)" class="input-modern" required>
+          <input type="number" id="egreso-monto" placeholder="Monto $" step="0.01" class="input-modern" required>
+          <button type="submit" class="btn btn-warning"><i class="fa-solid fa-minus"></i> Descontar Caja</button>
+        </form>
+      </div>
+      <div class="card">
+        <h4 class="mb-3">Buscar egresos por fecha</h4>
+        <div class="admin-filters mb-3">
+          <input type="date" id="egresos-desde" class="input-modern">
+          <input type="date" id="egresos-hasta" class="input-modern">
+          <button id="btn-buscar-egresos" class="btn btn-primary"><i class="fa-solid fa-filter"></i> Buscar</button>
+        </div>
+        <table class="table-modern">
+          <thead><tr><th>FECHA / HORA</th><th>EMPLEADO</th><th>MOTIVO</th><th>MONTO</th></tr></thead>
+          <tbody id="tabla-egresos-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECCIÓN 4: ADMINISTRACIÓN -->
+    <section id="sec-admin" class="view-section hidden">
+      <div class="section-header">
+        <h2>Panel de Administración</h2>
+        <div class="admin-controls">
+          <button id="btn-ver-ventas" class="btn btn-primary active">Resumen de Caja</button>
+          <button id="btn-ver-stock" class="btn btn-secondary">Inventario y Stock</button>
+        </div>
+      </div>
+
+      <div id="alerta-stock-admin" class="alert-banner hidden">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div>
+          <strong>¡Atención! Productos con Stock Bajo</strong>
+          <ul id="lista-alertas-stock"></ul>
+        </div>
+      </div>
+
+      <!-- RESUMEN DE CAJA -->
+      <div id="admin-resumen-view">
+        <div class="admin-filters card mb-4">
+          <input type="date" id="admin-desde" class="input-modern">
+          <input type="date" id="admin-hasta" class="input-modern">
+          <select id="admin-empleado" class="input-modern">
+            <option value="">Todos los Empleados</option>
+          </select>
+          <button id="btn-admin-filtrar" class="btn btn-primary"><i class="fa-solid fa-filter"></i> Filtrar</button>
+        </div>
+
+        <div class="stats-grid mb-4">
+          <div class="stat-card" style="border-left-color: #2563eb;"><h5>Ventas Efectivo</h5><h3 id="metric-efectivo">$0.00</h3></div>
+          <div class="stat-card" style="border-left-color: #2563eb;"><h5>Mercado Pago</h5><h3 id="metric-mp">$0.00</h3></div>
+          <div class="stat-card" style="border-left-color: #2563eb;"><h5>Tarjeta</h5><h3 id="metric-tarjeta">$0.00</h3></div>
+          <div class="stat-card" style="border-left-color: #2563eb;"><h5>Sube</h5><h3 id="metric-sube">$0.00</h3></div>
+        </div>
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 25px;">
+          <div class="stat-card danger"><h5>Total Egresos</h5><h3 id="metric-egresos">$0.00</h3></div>
+          <div class="stat-card" style="border-left-color: #10b981;"><h5>Total General</h5><h3 id="metric-general">$0.00</h3></div>
+        </div>
+
+        <div class="card mt-4">
+          <h4 class="mb-3">Historial de Turnos</h4>
+          <table class="table-modern">
+            <thead><tr><th>EMPLEADO</th><th>APERTURA</th><th>CIERRE</th><th>INICIAL</th><th>FINAL</th><th>VENDIDO (EFE)</th><th>DIFERENCIA</th></tr></thead>
+            <tbody id="tabla-turnos"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- GESTIÓN DE STOCK -->
+      <div id="admin-stock-view" class="hidden">
+        <div class="card mb-4">
+          <h4 class="mb-3"><i class="fa-solid fa-plus-circle"></i> Agregar Producto Nuevo</h4>
+          <form id="form-nuevo-producto" class="form-grid-producto">
+            <div><label class="text-muted"><small>Código Barras</small></label><input type="text" id="prod-codigo" class="input-modern"></div>
+            <div><label class="text-muted"><small>Categoría</small></label><input type="text" id="prod-categoria" class="input-modern" required></div>
+            <div style="grid-column: span 2;"><label class="text-muted"><small>Nombre del Producto</small></label><input type="text" id="prod-nombre" class="input-modern" required></div>
+            <div><label class="text-muted"><small>Precio Compra ($)</small></label><input type="number" id="prod-compra" step="0.01" class="input-modern" required></div>
+            <div><label class="text-muted"><small>Margen (%)</small></label><input type="number" id="prod-margen" step="0.01" class="input-modern" required></div>
+            <div><label class="text-muted"><small>Venta (Calculado)</small></label><input type="number" id="prod-precio" class="input-modern" style="background:#e2e8f0;" readonly></div>
+            <div><label class="text-muted"><small>Stock Inicial</small></label><input type="number" id="prod-stock" class="input-modern" required></div>
+            <div style="display: flex; align-items: flex-end;"><button type="submit" class="btn btn-success btn-block" style="height: 46px;">Guardar</button></div>
+          </form>
+        </div>
+        <div class="card">
+          <h4 class="mb-3">Catálogo Actual</h4>
+          <table class="table-modern">
+            <thead><tr><th>Código</th><th>Categoría</th><th>Producto</th><th>Costo</th><th>Venta</th><th>Stock</th><th>Acciones</th></tr></thead>
+            <tbody id="tabla-stock-admin"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

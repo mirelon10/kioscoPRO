@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KioscoPRO - Productos</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      body {
+        background: #f4f5f7;
+        color: #1a1a1a;
+      }
+
+      header {
+        background: #1e293b;
+        color: white;
+        padding: 16px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      header h1 {
+        font-size: 20px;
+        font-weight: 600;
+      }
+      header a,
+      #salir {
+        color: #cbd5e1;
+        text-decoration: none;
+        margin-left: 16px;
+      }
+      #salir {
+        background: none;
+        border: 1px solid #475569;
+        padding: 6px 14px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+
+      main {
+        max-width: 900px;
+        margin: 30px auto;
+        padding: 0 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      .card h2 {
+        font-size: 16px;
+        margin-bottom: 16px;
+        color: #334155;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+      form input {
+        padding: 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      form button {
+        grid-column: span 2;
+        padding: 14px;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      form button:hover {
+        background: #2563eb;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th {
+        text-align: left;
+        font-size: 12px;
+        color: #64748b;
+        text-transform: uppercase;
+        padding: 10px 8px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      td {
+        padding: 12px 8px;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 14px;
+      }
+      .stock-bajo {
+        color: #b91c1c;
+        font-weight: 600;
+      }
+
+      #mensaje {
+        text-align: center;
+        padding: 10px;
+        border-radius: 8px;
+        margin-top: 12px;
+        font-size: 14px;
+      }
+      #mensaje.error {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+      #mensaje.ok {
+        background: #dcfce7;
+        color: #15803d;
+      }
+      #mensaje.oculto {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>📦 KioscoPRO - Productos</h1>
+      <div>
+        <a href="admin.html">Panel Admin</a>
+        <button id="salir">Cerrar sesión</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="card">
+        <h2>Nuevo producto</h2>
+        <form id="form-producto">
+          <input
+            type="text"
+            id="codigoBarra"
+            placeholder="Código de barras"
+            required
+          />
+          <input
+            type="text"
+            id="nombre"
+            placeholder="Nombre del producto"
+            required
+          />
+          <input
+            type="number"
+            id="precioCompra"
+            placeholder="Precio de compra"
+            step="0.01"
+            min="0"
+            required
+          />
+          <input
+            type="number"
+            id="margen"
+            placeholder="Margen de ganancia (%)"
+            step="0.01"
+            min="0"
+            required
+          />
+          <input
+            type="text"
+            id="precioVenta"
+            placeholder="Precio de venta"
+            readonly
+            style="background: #f1f5f9"
+          />
+          <input
+            type="number"
+            id="stock"
+            placeholder="Stock inicial"
+            min="0"
+            required
+          />
+          <input
+            type="text"
+            id="categoria"
+            placeholder="Categoría (opcional)"
+          />
+          <button type="submit">Agregar producto</button>
+        </form>
+        <div id="mensaje" class="oculto"></div>
+      </div>
+
+      <div class="card">
+        <h2>Productos cargados</h2>
+        <table>
+          <thead>
+            <tr>
+              <tr><th>Código</th><th>Nombre</th><th>Precio</th><th>Stock</th><th>Categoría</th><th></th></tr>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th>Precio</th>
+              <th>Stock</th>
+              <th>Categoría</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-productos"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <script type="module" src="js/productos.js"></script>
+  </body>
+</html>
