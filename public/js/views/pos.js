@@ -246,6 +246,7 @@ async function cobrar() {
 
   const { total, vuelto } = await registrarVenta({
     turnoId: sesion.turno.id,
+    usuario: sesion.usuario,
     carrito: [...carrito].map(([productoId, cantidad]) => ({ productoId, cantidad })),
     metodoPago: selectMetodo.value,
     montoRecibido,
@@ -270,7 +271,7 @@ async function cargarSube() {
   const monto = parsearMonto(input.value);
   if (!(monto > 0)) return avisar("Monto inválido", "Ingresá un monto mayor a 0.");
 
-  await registrarRecargaSube({ turnoId: sesion.turno.id, monto, metodoPago: selectMetodo.value });
+  await registrarRecargaSube({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto, metodoPago: selectMetodo.value });
 
   notificarExito(`Recarga SUBE registrada: ${formatearMoneda(monto)}`);
   input.value = "";

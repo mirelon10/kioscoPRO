@@ -7,9 +7,6 @@ serviceAccountKey*.json
 .env
 .env.*
 
-# Copia generada de la lógica compartida (scripts/copiar-compartido.js)
-functions/compartido/
-
 # Firebase / Netlify
 .firebase/
 *-debug.log

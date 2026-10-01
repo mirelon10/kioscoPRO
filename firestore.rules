@@ -4,8 +4,7 @@ rules_version = '2';
 //
 // Roles: custom claim `rol` ("admin" | "empleado"), asignado con scripts/set-rol.js.
 //
-// Ventas, descuentos de stock y cierres de turno los escriben SOLO las Cloud Functions
-// (functions/index.js), que usan el Admin SDK y no pasan por estas reglas.
+// No hay servidor propio (plan Spark): estas reglas son la única barrera de seguridad.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -18,6 +17,9 @@ service cloud.firestore {
     function esPersonal() { return autenticado() && rol() in ['admin', 'empleado']; }
 
     function nuevo() { return request.resource.data; }
+    function cambiaSolo(campos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+    }
     function tieneExactamente(campos) {
       return nuevo().keys().hasAll(campos) && nuevo().keys().hasOnly(campos);
     }
@@ -50,17 +52,37 @@ service cloud.firestore {
         && p.get('margen', 0) is number && p.get('margen', 0) >= 0 && p.get('margen', 0) <= 10000;
     }
 
-    // El stock lo descuenta la función registrarVenta; desde el navegador solo lo edita el admin.
+    // Al cobrar, el empleado solo puede bajar el stock (nunca subirlo ni tocar precios).
+    // Limitación: las reglas no pueden recorrer los ítems de la venta para verificar que la
+    // cantidad descontada coincida exactamente; para eso haría falta un servidor (plan Blaze).
+    function descuentoDeStock() {
+      return esPersonal()
+        && cambiaSolo(['stock'])
+        && nuevo().stock is int
+        && nuevo().stock >= 0
+        && nuevo().stock < resource.data.stock;
+    }
+
     match /productos/{productoId} {
       allow read: if esPersonal();
-      allow create, update: if esAdmin() && productoValido(nuevo());
+      allow create: if esAdmin() && productoValido(nuevo());
+      allow update: if (esAdmin() && productoValido(nuevo())) || descuentoDeStock();
       allow delete: if esAdmin();
     }
 
     // ---------- Turnos ----------
     // turnosActivos/{uid} funciona como candado: solo puede existir uno por empleado.
-    // Se crea en el mismo batch que abre el turno; el cierre (que lo borra) lo hace la
-    // función cerrarTurno, que calcula el efectivo esperado en el servidor.
+    // Se crea en el mismo batch que abre el turno y se borra en el mismo batch que lo cierra.
+    // Cierra el propio empleado o un admin (por ejemplo, si el empleado se fue sin cerrar).
+
+    function puedeCerrar(empleadoId) {
+      return esPersonal() && (empleadoId == uid() || esAdmin());
+    }
+    // Al cerrar, el candado del empleado no puede seguir apuntando a este turno.
+    function candadoLiberado(empleadoId, turnoId) {
+      return !existsAfter(turnoActivo(empleadoId))
+        || getAfter(turnoActivo(empleadoId)).data.turnoId != turnoId;
+    }
 
     match /turnos/{turnoId} {
       // resource == null: la app empieza a escuchar el turno recién abierto antes de que llegue al
@@ -76,7 +98,18 @@ service cloud.firestore {
         && nuevo().fechaApertura == request.time
         && getAfter(turnoActivo(uid())).data.turnoId == turnoId;
 
-      allow update, delete: if false;
+      allow update: if puedeCerrar(resource.data.empleadoId)
+        && resource.data.estado == 'abierto'
+        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre', 'cerradoPor', 'cerradoPorNombre'])
+        && nuevo().estado == 'cerrado'
+        && esMonto(nuevo().cajaFinal)
+        && nuevo().fechaCierre == request.time
+        // cerradoPor es opcional para seguir aceptando el formato anterior, pero nunca falsificable.
+        && nuevo().get('cerradoPor', uid()) == uid()
+        && (!('cerradoPorNombre' in nuevo()) || esTexto(nuevo().cerradoPorNombre, 200))
+        && candadoLiberado(resource.data.empleadoId, turnoId);
+
+      allow delete: if false;
     }
 
     match /turnosActivos/{empleadoId} {
@@ -89,14 +122,43 @@ service cloud.firestore {
         && getAfter(turno(nuevo().turnoId)).data.empleadoId == uid()
         && getAfter(turno(nuevo().turnoId)).data.estado == 'abierto';
 
-      allow update, delete: if false;
+      allow delete: if puedeCerrar(empleadoId)
+        && getAfter(turno(resource.data.turnoId)).data.estado == 'cerrado';
+
+      allow update: if false;
     }
 
-    // ---------- Ventas (las crean solo las funciones; inmutables) ----------
+    // ---------- Ventas (inmutables) ----------
+
+    // En efectivo se guarda con cuánto pagó el cliente y el vuelto. Son opcionales (el formato
+    // anterior no los tiene), pero si vienen tienen que ser coherentes.
+    function pagoValido(v) {
+      let recibido = v.get('montoRecibido', null);
+      let vuelto = v.get('vuelto', null);
+      return recibido == null
+        ? vuelto == null
+        : v.tipo == 'productos' && v.metodoPago == 'Efectivo'
+          && esMonto(recibido) && recibido >= v.total && esMonto(vuelto);
+    }
 
     match /ventas/{ventaId} {
       allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
-      allow create, update, delete: if false;
+
+      allow create: if esPersonal()
+        && nuevo().keys().hasAll(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp'])
+        && nuevo().keys().hasOnly(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp', 'montoRecibido', 'vuelto'])
+        && nuevo().tipo in ['productos', 'sube']
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && nuevo().metodoPago in ['Efectivo', 'Mercado Pago', 'Tarjeta']
+        && nuevo().items is list && nuevo().items.size() > 0 && nuevo().items.size() <= 100
+        && esMonto(nuevo().total) && nuevo().total > 0
+        && pagoValido(nuevo())
+        && nuevo().timestamp == request.time
+        && nuevo().turnoId is string
+        && turnoAbiertoPropio(nuevo().turnoId);
+
+      allow update, delete: if false;
     }
 
     // ---------- Egresos (inmutables) ----------

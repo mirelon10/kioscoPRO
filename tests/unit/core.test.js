@@ -253,11 +253,3 @@ describe("armarExcelResumen", () => {
     assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", 301]);
   });
 });
-
-describe("mensajeDeError con Cloud Functions", () => {
-  test("muestra el mensaje del servidor y oculta los errores de conexión", () => {
-    assert.equal(mensajeDeError({ code: "functions/failed-precondition", message: "Stock insuficiente de Agua (quedan 0)." }), "Stock insuficiente de Agua (quedan 0).");
-    assert.match(mensajeDeError({ code: "functions/internal", message: "internal" }), /conectar/);
-    assert.match(mensajeDeError({ code: "functions/unavailable", message: "x" }), /conectar/);
-  });
-});

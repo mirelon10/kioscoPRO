@@ -11,7 +11,6 @@ import {
   onSnapshot,
   writeBatch,
   serverTimestamp,
-  llamarFuncion,
 } from "../firebase.js";
 import { ErrorNegocio } from "../core/errores.js";
 
@@ -94,12 +93,23 @@ export async function abrirTurno(usuario, cajaInicial) {
 }
 
 /**
- * Cierra un turno en el servidor (función cerrarTurno), que recalcula el efectivo esperado.
- * El admin puede cerrar el turno de otro empleado.
- * @returns {Promise<{ esperado: number, cajaContada: number, diferencia: number }>}
+ * Cierra un turno guardando el efectivo contado y quién lo cerró, y libera el candado.
+ * El admin puede cerrar el turno de otro empleado (las reglas lo verifican).
+ * El esperado no se guarda: el panel lo recalcula siempre desde las ventas y egresos.
  */
-export function cerrarTurno(turnoId, cajaContada) {
-  return llamarFuncion("cerrarTurno", { turnoId, cajaContada });
+export async function cerrarTurno(turno, cajaContada, usuario) {
+  const batch = writeBatch(db);
+  batch.update(doc(turnosCol, turno.id), {
+    estado: "cerrado",
+    cajaFinal: cajaContada,
+    fechaCierre: serverTimestamp(),
+    cerradoPor: usuario.uid,
+    cerradoPorNombre: usuario.email,
+  });
+  // Solo si el candado apunta a este turno (un turno viejo puede no tenerlo).
+  const candadoSnap = await getDoc(candado(turno.empleadoId));
+  if (candadoSnap.exists() && candadoSnap.data().turnoId === turno.id) batch.delete(candado(turno.empleadoId));
+  await batch.commit();
 }
 
 // ---------- Ventas y egresos de un turno (para calcular la caja) ----------

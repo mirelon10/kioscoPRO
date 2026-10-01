@@ -19,7 +19,7 @@
       style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; \
       font-src 'self' https://cdnjs.cloudflare.com; \
       img-src 'self' data:; \
-      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://southamerica-east1-kioscopro-db07e.cloudfunctions.net; \
+      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; \
       frame-src https://kioscopro-db07e.firebaseapp.com; \
       object-src 'none'; \
       base-uri 'self'; \

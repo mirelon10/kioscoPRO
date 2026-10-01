@@ -4,11 +4,8 @@ Sistema de gestión para kiosco: ventas (POS) con cálculo de vuelto, caja por t
 y panel de administración con exportación a Excel.
 
 - **Frontend:** HTML + JavaScript (módulos ES nativos, sin build), publicado en **Netlify**.
-- **Backend:** **Firebase Auth**, **Firestore** y **Cloud Functions** (región `southamerica-east1`).
-  - Todo lo que mueve plata o stock (cobrar, recargar SUBE, cerrar turnos) pasa por las funciones de
-    [`functions/index.js`](functions/index.js): el servidor calcula totales, vuelto y caja esperada.
-  - El resto (catálogo, abrir turno, egresos, lecturas) va directo a Firestore, protegido por
-    [`firestore.rules`](firestore.rules).
+- **Backend:** no hay servidor propio (plan gratuito Spark de Firebase). La app habla directo con
+  **Firebase Auth** y **Firestore**, y la seguridad la imponen las reglas de [`firestore.rules`](firestore.rules).
 
 ## Estructura
 
@@ -18,35 +15,29 @@ public/                  ← lo que publica Netlify
   css/style.css
   js/
     main.js              ← autenticación, navegación y ciclo de vida de los listeners
-    firebase.js          ← único punto de acceso al SDK (versión, configuración, llamadas a funciones)
+    firebase.js          ← único punto de acceso al SDK (versión + configuración)
     estado.js            ← estado de la sesión (usuario, rol, turno, movimientos del turno, catálogo)
     ui.js                ← diálogos, toasts y manejo de botones ocupados
     lib/                 ← utilidades: dinero, fechas, DOM, Excel
-    core/                ← reglas de negocio puras, compartidas con las Cloud Functions
-    data/                ← acceso a Firestore y a las funciones
+    core/                ← reglas de negocio puras (testeables con Node)
+    data/                ← acceso a Firestore
     views/               ← una vista por sección: pos, turno, egresos, admin, stock
-functions/
-  index.js               ← Cloud Functions: registrarVenta, registrarRecargaSube, cerrarTurno
-  compartido/            ← copia generada de public/js/core y lib (no se edita a mano)
-firestore.rules          ← seguridad de lo que el navegador puede leer y escribir
+firestore.rules          ← seguridad (la parte más importante)
+firestore.indexes.json   ← índices compuestos
 netlify.toml             ← publicación y cabeceras de seguridad (CSP)
 scripts/set-rol.js       ← asigna roles a los usuarios
-scripts/copiar-compartido.js ← copia la lógica compartida a functions/ (corre solo antes de cada deploy)
-tests/unit/              ← lógica de negocio
-tests/rules/             ← reglas de seguridad contra el emulador de Firestore
-tests/functions/         ← Cloud Functions contra los emuladores
+tests/unit/              ← tests de la lógica de negocio
+tests/rules/             ← tests de las reglas contra el emulador de Firestore
 ```
 
 ## Puesta en marcha
 
 ### 1. Requisitos
 
-- Node 20+ y, para los emuladores y los tests de reglas/funciones, **Java 21+**.
-- El proyecto de Firebase en el **plan Blaze** (las Cloud Functions lo requieren; la cuota gratuita
-  alcanza de sobra para un kiosco).
+Node 20+ y, para los emuladores y los tests de reglas, **Java 21+**.
 
 ```bash
-npm install          # instala también las dependencias de functions/
+npm install
 npx firebase login   # en una terminal propia: el login es interactivo
 ```
 
@@ -64,17 +55,15 @@ npm run set-rol -- ex-empleado@ejemplo.com ninguno   # quita el acceso
 
 Un usuario sin rol no puede entrar.
 
-### 3. Publicar (en este orden)
+### 3. Publicar
 
 ```bash
-npm test                    # unitarios + reglas + funciones
-npm run deploy:functions    # 1º: las funciones nuevas
-# 2º: mergear a main → Netlify publica el frontend que usa las funciones
-npm run deploy:rules        # 3º: recién ahí, las reglas que bloquean el camino viejo
+npm test               # unitarios + reglas
+npm run deploy:rules   # reglas e índices
 ```
 
-El orden importa: las reglas nuevas impiden crear ventas desde el navegador, así que si se publican antes
-que el frontend nuevo, la versión vieja de la app no puede cobrar.
+El frontend lo publica Netlify solo al mergear a `main`. Si un cambio agrega campos nuevos a los
+documentos, publicá primero las reglas (que aceptan el formato nuevo) y después mergeá.
 
 ### 4. Netlify
 
@@ -87,7 +76,7 @@ La API key web está restringida por referente HTTP: si agregás un dominio (por
 Probá contra los emuladores para no tocar los datos reales:
 
 ```bash
-npm run emuladores       # Auth + Firestore + Functions locales (UI en http://localhost:4000)
+npm run emuladores       # Auth + Firestore locales (UI en http://localhost:4000)
 npm run dev              # en otra terminal: sirve public/ en http://localhost:3000
 ```
 
@@ -97,23 +86,24 @@ Abrí `http://localhost:3000/?emulador`. Los usuarios y roles de prueba se crean
 ## Tests
 
 ```bash
-npm run test:unit        # lógica de negocio (rápido, sin emulador)
-npm run test:rules       # reglas de seguridad (requiere Java 21+)
-npm run test:functions   # Cloud Functions contra los emuladores (requiere Java 21+)
-npm test                 # todo
+npm run test:unit    # lógica de negocio (rápido, sin emulador)
+npm run test:rules   # reglas de seguridad contra el emulador (requiere Java 21+)
+npm test             # ambos
 ```
 
 ## Cómo funciona
 
 **Cobro:** el cajero escanea productos (Enter), y con Enter en el buscador vacío salta a *Paga con*. Ahí
 escribe con cuánto paga el cliente y ve el vuelto en vivo; con Enter cobra. En efectivo no se puede cobrar si
-el pago no alcanza. La función `registrarVenta` vuelve a calcular todo con los precios y el stock reales,
-descuenta el stock exacto de cada producto y guarda la venta, todo en una transacción.
+el pago no alcanza. Al cobrar, una transacción vuelve a leer los precios y el stock reales, recalcula el
+total y el vuelto, descuenta el stock y guarda la venta. Si dos cajas venden la última unidad a la vez,
+una de las dos falla en lugar de dejar stock negativo.
 
 **Turnos:** se abren con el efectivo inicial. Mientras el turno está abierto, la pantalla de *Caja y turnos*
 muestra en vivo `caja inicial + ventas en efectivo − egresos = efectivo esperado`. Al cerrar, el monto
 contado viene precargado con el esperado; si el empleado contó otra cosa, lo corrige y queda registrada
-la diferencia (faltante/sobrante). La función `cerrarTurno` recalcula el esperado en el servidor.
+la diferencia (faltante/sobrante). El esperado no se guarda: el panel lo recalcula siempre desde las
+ventas y los egresos del turno.
 
 **Cierre forzado:** si un empleado se va sin cerrar, el admin lo cierra desde *Administración → Turnos del
 período* (botón *Cerrar*). Queda registrado quién lo cerró.
@@ -127,22 +117,24 @@ fechas son valores reales de Excel, se pueden sumar y filtrar.
 
 | Colección | Documento | Quién escribe |
 |---|---|---|
-| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El stock lo descuenta `registrarVenta`. |
-| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `cajaEsperada, fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra `cerrarTurno`. |
-| `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. |
-| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Solo las funciones. **Inmutables.** |
+| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El empleado solo puede **bajar** `stock` al cobrar. |
+| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
+| `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
+| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
 | `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, fecha` | Empleado con turno abierto. **Inmutables.** |
 
-Las fechas siempre las pone el servidor (`serverTimestamp`).
+Las fechas siempre las pone el servidor (`serverTimestamp`) y las reglas lo verifican.
 
 **Recarga SUBE:** es una venta `tipo: "sube"` cobrada con el método elegido. Si es en efectivo, suma a la
 caja del turno.
 
 ## Limitaciones conocidas
 
-- Cobrar requiere conexión. El catálogo sí carga desde la caché local.
-- La primera venta después de un rato sin uso puede tardar 1–3 segundos más (arranque en frío de la función).
-  Si molesta, se puede configurar `minInstances: 1` en `functions/index.js`, que tiene un costo mensual fijo.
+- Sin servidor propio, las reglas verifican que el empleado solo **baje** el stock y que la venta sea de su
+  turno abierto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
+  exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
+  servidor (Cloud Functions, que necesitan el plan Blaze).
+- Cobrar requiere conexión (las transacciones no funcionan offline). El catálogo sí carga desde la caché local.
 - La recarga SUBE no calcula vuelto (solo la venta de productos).
 - Datos anteriores a la migración: los productos con `codigoBarra` y las ventas SUBE viejas
   (`metodoPago: "Sube"`) se leen bien y se normalizan al editarlos. Si hubiera egresos muy viejos

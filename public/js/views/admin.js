@@ -233,8 +233,8 @@ async function cerrarTurnoDesdeAdmin(turnoId) {
   });
   if (!datos) return;
 
-  const resultado = await cerrarTurno(turnoId, datos.contado);
-  const diferencia = redondear(resultado.diferencia);
+  await cerrarTurno(turno, datos.contado, sesion.usuario);
+  const diferencia = redondear(datos.contado - caja.esperado);
   notificarExito(
     diferencia === 0 ? "Turno cerrado sin diferencias" : `Turno cerrado · diferencia ${diferencia > 0 ? "+" : ""}${formatearMoneda(diferencia)}`,
   );

@@ -5,8 +5,8 @@ import { normalizarVenta } from "./ventas.js";
  * Efectivo que debería haber en la caja de un turno:
  *   caja inicial + ventas en efectivo (incluye recargas SUBE) − egresos.
  *
- * La usa el navegador para mostrar el monto al cerrar y la Cloud Function para
- * guardar el valor oficial, así ambos calculan exactamente lo mismo.
+ * La usan la pantalla de cierre de turno y el panel de administración, así ambos
+ * muestran exactamente el mismo número.
  */
 export function calcularCajaTurno({ cajaInicial, ventas, egresos }) {
   const normalizadas = ventas.map(normalizarVenta);

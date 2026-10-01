@@ -54,20 +54,19 @@ function abrirTurno(fs, uid, turnoId = `turno-${uid}`) {
 }
 
 
-/** Intento de cerrar un turno desde el navegador (ahora solo lo hace la función cerrarTurno). */
-function intentarCerrarTurno(fs, uid, turnoId = `turno-${uid}`) {
+/** Cierre como lo hace la app: actualiza el turno y libera el candado del empleado en un batch. */
+function cerrarTurno(fs, cerrador, empleadoId, turnoId = `turno-${empleadoId}`, extra = {}) {
   const batch = writeBatch(fs);
-  batch.update(doc(fs, "turnos", turnoId), { estado: "cerrado", cajaFinal: 1500, fechaCierre: serverTimestamp() });
-  batch.delete(doc(fs, "turnosActivos", uid));
-  return batch.commit();
-}
-
-/** Simula el cierre que hace la Cloud Function (Admin SDK, sin reglas). */
-async function cerrarComoServidor(uid, turnoId = `turno-${uid}`) {
-  await sembrar({
-    [`turnos/${turnoId}`]: { empleadoId: uid, empleadoNombre: "x", cajaInicial: 1000, estado: "cerrado", cajaFinal: 1000 },
+  batch.update(doc(fs, "turnos", turnoId), {
+    estado: "cerrado",
+    cajaFinal: 1500,
+    fechaCierre: serverTimestamp(),
+    cerradoPor: cerrador,
+    cerradoPorNombre: `${cerrador}@kiosco.test`,
+    ...extra,
   });
-  await env.withSecurityRulesDisabled((ctx) => deleteDoc(doc(ctx.firestore(), `turnosActivos/${uid}`)));
+  batch.delete(doc(fs, "turnosActivos", empleadoId));
+  return batch.commit();
 }
 
 const venta = (uid, extra = {}) => ({
@@ -78,6 +77,8 @@ const venta = (uid, extra = {}) => ({
   metodoPago: "Efectivo",
   items: [{ productoId: "p1", nombre: "Agua", precio: 600, cantidad: 1, subtotal: 600 }],
   total: 600,
+  montoRecibido: 1000,
+  vuelto: 400,
   timestamp: serverTimestamp(),
   ...extra,
 });
@@ -136,11 +137,13 @@ describe("productos", () => {
     await assertFails(setDoc(doc(fs, "productos/e"), producto({ campoRaro: true })));
   });
 
-  test("el empleado no puede tocar el stock (lo descuenta solo el servidor al cobrar)", async () => {
+  test("el empleado solo puede bajar el stock, nunca subirlo ni dejarlo negativo", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     const fs = comoAna();
-    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 4 }));
+    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 4 }));
     await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 50 }));
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: -1 }));
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 3, precio: 1 }));
   });
 
   test("al editar, el admin puede borrar campos viejos como codigoBarra", async () => {
@@ -150,20 +153,17 @@ describe("productos", () => {
 });
 
 describe("turnos", () => {
-  test("el empleado abre su turno", async () => {
+  test("el empleado abre y cierra su turno", async () => {
     await assertSucceeds(abrirTurno(comoAna(), ANA));
+    await assertSucceeds(cerrarTurno(comoAna(), ANA, ANA));
   });
 
-  test("no se pueden tener dos turnos abiertos", async () => {
+  test("no se pueden tener dos turnos abiertos, pero sí abrir otro después de cerrar", async () => {
     const fs = comoAna();
     await assertSucceeds(abrirTurno(fs, ANA, "t1"));
     await assertFails(abrirTurno(fs, ANA, "t2"));
-  });
-
-  test("después de que el servidor cierra el turno, se puede abrir otro", async () => {
-    await abrirTurno(comoAna(), ANA, "t1");
-    await cerrarComoServidor(ANA, "t1");
-    await assertSucceeds(abrirTurno(comoAna(), ANA, "t2"));
+    await cerrarTurno(fs, ANA, ANA, "t1");
+    await assertSucceeds(abrirTurno(fs, ANA, "t2"));
   });
 
   test("no se puede abrir un turno sin candado ni a nombre de otro", async () => {
@@ -174,21 +174,57 @@ describe("turnos", () => {
     await assertFails(abrirTurno(fs, BETO));
   });
 
-  test("nadie cierra turnos desde el navegador, ni siquiera el admin (lo hace la función)", async () => {
+  test("un empleado no puede cerrar el turno de otro; el admin sí", async () => {
     await abrirTurno(comoAna(), ANA);
-    await assertFails(intentarCerrarTurno(comoAna(), ANA));
-    await assertFails(intentarCerrarTurno(comoAdmin(), ANA));
+    await assertFails(cerrarTurno(comoBeto(), BETO, ANA));
+    await assertSucceeds(cerrarTurno(comoAdmin(), ADMIN, ANA));
+  });
+
+  test("al cerrar hay que liberar el candado, y no se puede liberar sin cerrar", async () => {
+    await abrirTurno(comoAna(), ANA);
     await assertFails(
-      updateDoc(doc(comoAna(), `turnos/turno-${ANA}`), { estado: "cerrado", cajaFinal: 10, fechaCierre: serverTimestamp() }),
+      updateDoc(doc(comoAna(), `turnos/turno-${ANA}`), {
+        estado: "cerrado", cajaFinal: 10, fechaCierre: serverTimestamp(), cerradoPor: ANA, cerradoPorNombre: "a",
+      }),
     );
     await assertFails(deleteDoc(doc(comoAna(), `turnosActivos/${ANA}`)));
+    await assertFails(deleteDoc(doc(comoAdmin(), `turnosActivos/${ANA}`)));
+  });
+
+  test("no se puede falsificar quién cerró, la fecha ni agregar campos", async () => {
+    await abrirTurno(comoAna(), ANA);
+    const fs = comoAna();
+    await assertFails(cerrarTurno(fs, ANA, ANA, undefined, { cerradoPor: ADMIN }));
+    await assertFails(cerrarTurno(fs, ANA, ANA, undefined, { fechaCierre: new Date(2020, 0, 1) }));
+    await assertFails(cerrarTurno(fs, ANA, ANA, undefined, { cajaFinal: -5 }));
+    await assertFails(cerrarTurno(fs, ANA, ANA, undefined, { cajaEsperada: 1500 }));
+    await assertFails(cerrarTurno(fs, ANA, ANA, undefined, { cajaInicial: 0 }));
+  });
+
+  test("sigue aceptando el cierre en el formato anterior (sin cerradoPor)", async () => {
+    await abrirTurno(comoAna(), ANA);
+    const fs = comoAna();
+    const batch = writeBatch(fs);
+    batch.update(doc(fs, `turnos/turno-${ANA}`), { estado: "cerrado", cajaFinal: 1500, fechaCierre: serverTimestamp() });
+    batch.delete(doc(fs, `turnosActivos/${ANA}`));
+    await assertSucceeds(batch.commit());
   });
 
   test("un turno cerrado no se reabre ni se modifica", async () => {
     await abrirTurno(comoAna(), ANA);
-    await cerrarComoServidor(ANA);
+    await cerrarTurno(comoAna(), ANA, ANA);
     await assertFails(updateDoc(doc(comoAna(), `turnos/turno-${ANA}`), { cajaFinal: 99999 }));
-    await assertFails(updateDoc(doc(comoAna(), `turnos/turno-${ANA}`), { estado: "abierto" }));
+    await assertFails(updateDoc(doc(comoAdmin(), `turnos/turno-${ANA}`), { estado: "abierto" }));
+  });
+
+  test("el admin puede cerrar un turno viejo que no tiene candado", async () => {
+    await sembrar({ "turnos/viejo": { empleadoId: ANA, empleadoNombre: "a", cajaInicial: 0, estado: "abierto" } });
+    const fs = comoAdmin();
+    await assertSucceeds(
+      updateDoc(doc(fs, "turnos/viejo"), {
+        estado: "cerrado", cajaFinal: 0, fechaCierre: serverTimestamp(), cerradoPor: ADMIN, cerradoPorNombre: "admin",
+      }),
+    );
   });
 
   test("se puede adoptar un turno abierto antes de la migración (sin candado)", async () => {
@@ -203,21 +239,81 @@ describe("turnos", () => {
     await assertFails(getDoc(doc(sinRol(), "turnos/todavia-no-existe")));
   });
 
-  test("el empleado solo ve sus turnos; el admin ve todos", async () => {
+  test("el empleado solo ve sus turnos; el admin ve todos (y sus candados)", async () => {
     await abrirTurno(comoAna(), ANA);
     await assertSucceeds(getDoc(doc(comoAna(), `turnos/turno-${ANA}`)));
     await assertFails(getDoc(doc(comoBeto(), `turnos/turno-${ANA}`)));
     await assertFails(getDocs(collection(comoBeto(), "turnos")));
     await assertSucceeds(getDocs(collection(comoAdmin(), "turnos")));
+    await assertSucceeds(getDoc(doc(comoAdmin(), `turnosActivos/${ANA}`)));
+    await assertFails(getDoc(doc(comoBeto(), `turnosActivos/${ANA}`)));
   });
 });
 
 describe("ventas", () => {
-  test("nadie crea ventas desde el navegador: solo la función registrarVenta", async () => {
-    await abrirTurno(comoAna(), ANA);
+  test("venta en efectivo con monto recibido y vuelto", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await assertSucceeds(addDoc(collection(fs, "ventas"), venta(ANA)));
+  });
+
+  test("venta + descuento de stock en el mismo batch (como la transacción de la app)", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }) });
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const batch = writeBatch(fs);
+    batch.update(doc(fs, "productos/p1"), { stock: 4 });
+    batch.set(doc(collection(fs, "ventas")), venta(ANA));
+    await assertSucceeds(batch.commit());
+  });
+
+  test("en efectivo el pago tiene que cubrir el total; en otros medios no hay pago ni vuelto", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const ventas = collection(fs, "ventas");
+    await assertFails(addDoc(ventas, venta(ANA, { montoRecibido: 500, vuelto: 0 })));
+    await assertFails(addDoc(ventas, venta(ANA, { montoRecibido: null })));
+    await assertFails(addDoc(ventas, venta(ANA, { vuelto: -400 })));
+    await assertFails(addDoc(ventas, venta(ANA, { metodoPago: "Tarjeta" })));
+    await assertSucceeds(addDoc(ventas, venta(ANA, { metodoPago: "Tarjeta", montoRecibido: null, vuelto: null })));
+  });
+
+  test("sigue aceptando ventas en el formato anterior (sin monto recibido ni vuelto)", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const { montoRecibido, vuelto, ...formatoAnterior } = venta(ANA);
+    await assertSucceeds(addDoc(collection(fs, "ventas"), formatoAnterior));
+  });
+
+  test("recarga SUBE con el método de pago elegido, sin vuelto", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const sube = { tipo: "sube", montoRecibido: null, vuelto: null };
+    await assertSucceeds(addDoc(collection(fs, "ventas"), venta(ANA, { ...sube, metodoPago: "Efectivo" })));
+    await assertSucceeds(addDoc(collection(fs, "ventas"), venta(ANA, { ...sube, metodoPago: "Mercado Pago" })));
+  });
+
+  test("sin turno abierto, con turno ajeno o cerrado no se vende", async () => {
     await assertFails(addDoc(collection(comoAna(), "ventas"), venta(ANA)));
-    await assertFails(addDoc(collection(comoAna(), "ventas"), venta(ANA, { tipo: "sube" })));
-    await assertFails(addDoc(collection(comoAdmin(), "ventas"), venta(ADMIN)));
+
+    await abrirTurno(comoBeto(), BETO);
+    await assertFails(addDoc(collection(comoAna(), "ventas"), venta(ANA, { turnoId: `turno-${BETO}` })));
+
+    await abrirTurno(comoAna(), ANA);
+    await cerrarTurno(comoAna(), ANA, ANA);
+    await assertFails(addDoc(collection(comoAna(), "ventas"), venta(ANA)));
+  });
+
+  test("no se puede firmar una venta a nombre de otro, con fecha falsa o datos inválidos", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const ventas = collection(fs, "ventas");
+    await assertFails(addDoc(ventas, venta(ANA, { empleadoId: BETO })));
+    await assertFails(addDoc(ventas, venta(ANA, { timestamp: new Date(2020, 0, 1) })));
+    await assertFails(addDoc(ventas, venta(ANA, { metodoPago: "Bitcoin" })));
+    await assertFails(addDoc(ventas, venta(ANA, { total: -100 })));
+    await assertFails(addDoc(ventas, venta(ANA, { items: [] })));
+    await assertFails(addDoc(ventas, venta(ANA, { descuento: 50 })));
   });
 
   test("las ventas son inmutables", async () => {
@@ -258,7 +354,7 @@ describe("egresos", () => {
     await assertFails(addDoc(egresos, egreso(ANA, { monto: 0 })));
     await assertFails(addDoc(egresos, egreso(ANA, { motivo: "" })));
     await assertFails(addDoc(egresos, egreso(ANA, { empleadoId: BETO })));
-    await cerrarComoServidor(ANA);
+    await cerrarTurno(fs, ANA, ANA);
     await assertFails(addDoc(egresos, egreso(ANA)));
   });
 

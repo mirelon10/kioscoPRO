@@ -126,7 +126,7 @@ async function alCerrar() {
   });
   if (!ok) return;
 
-  const resultado = await cerrarTurno(sesion.turno.id, cajaContada);
+  await cerrarTurno(sesion.turno, cajaContada, sesion.usuario);
   contadoEditado = false;
-  notificarExito(`Turno cerrado · esperado ${formatearMoneda(resultado.esperado)}`);
+  notificarExito(`Turno cerrado · ${detalle}`);
 }
