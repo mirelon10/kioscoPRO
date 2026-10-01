@@ -1,0 +1,28 @@
+# Sitio 100% estático: no hay build, Netlify publica la carpeta public/ tal cual.
+[build]
+  publish = "public"
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    # Solo se permite cargar código de este sitio, del SDK de Firebase (gstatic) y de SweetAlert (jsdelivr).
+    # Si agregás otro servicio de Firebase o una librería nueva, sumá su dominio acá.
+    # Las barras al final de línea hacen que TOML lo una en un solo renglón.
+    Content-Security-Policy = """\
+      default-src 'self'; \
+      script-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net; \
+      style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; \
+      font-src 'self' https://cdnjs.cloudflare.com; \
+      img-src 'self' data:; \
+      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; \
+      frame-src https://kioscopro-db07e.firebaseapp.com; \
+      object-src 'none'; \
+      base-uri 'self'; \
+      form-action 'self'; \
+      frame-ancestors 'none'\
+      """
