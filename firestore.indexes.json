@@ -1,13 +1,4 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "egresos",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "empleadoId", "order": "ASCENDING" },
-        { "fieldPath": "fecha", "order": "DESCENDING" }
-      ]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": []
 }

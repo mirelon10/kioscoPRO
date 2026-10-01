@@ -4,6 +4,7 @@ export const sesion = {
   usuario: null, // Firebase User
   rol: null, // "admin" | "empleado"
   turno: null, // turno abierto del usuario o null
+  movimientosTurno: null, // { ventas, egresos } del turno abierto, en tiempo real
   productos: [], // catálogo en tiempo real
 };
 

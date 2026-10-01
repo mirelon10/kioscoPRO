@@ -1,17 +1,21 @@
-import { $, h, filaVacia, mostrar } from "../lib/dom.js";
-import { formatearMoneda } from "../lib/dinero.js";
+import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
+import { formatearMoneda, parsearMonto, redondear } from "../lib/dinero.js";
 import { fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
+import { calcularCajaTurno } from "../core/caja.js";
+import { armarExcelResumen } from "../core/exportacion.js";
 import { productosConStockBajo } from "../core/productos.js";
 import { obtenerMovimientos } from "../data/reportes.js";
+import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
+import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
-import { avisar, mostrarError } from "../ui.js";
-import { renderTablaEgresos } from "./egresos.js";
+import { avisar, conBoton, formularioModal, mostrarError, notificarExito } from "../ui.js";
 import { renderStock } from "./stock.js";
 
 const selectEmpleado = $("admin-empleado");
 const btnResumen = $("btn-ver-ventas");
 const btnStock = $("btn-ver-stock");
+const btnExcel = $("btn-exportar-excel");
 
 /** Último período consultado: cambiar de empleado filtra sin volver a leer Firestore. */
 let movimientos = null;
@@ -25,6 +29,12 @@ export function iniciarAdmin() {
     cargarResumen();
   });
   selectEmpleado.addEventListener("change", renderResumen);
+  btnExcel.addEventListener("click", () => conBoton(btnExcel, exportarExcel));
+
+  $("tabla-turnos").addEventListener("click", (e) => {
+    const boton = e.target.closest("button[data-cerrar-turno]");
+    if (boton) conBoton(boton, () => cerrarTurnoDesdeAdmin(boton.dataset.cerrarTurno));
+  });
 
   alCambiarSesion((_, cambios) => {
     if ("productos" in cambios) renderAlertasStock();
@@ -37,6 +47,7 @@ export function reiniciarAdmin() {
   $("admin-hasta").value = hoy;
   selectEmpleado.replaceChildren(h("option", { value: "" }, "Todos los empleados"));
   movimientos = null;
+  btnExcel.disabled = true;
   mostrarPestania("resumen", { cargar: false });
 }
 
@@ -101,9 +112,13 @@ function renderOpcionesEmpleado(empleados) {
   if (empleados.some((e) => e.id === seleccionado)) selectEmpleado.value = seleccionado;
 }
 
+function resumenActual() {
+  return movimientos && calcularResumen({ ...movimientos, empleadoId: selectEmpleado.value });
+}
+
 function renderResumen() {
-  if (!movimientos) return;
-  const r = calcularResumen({ ...movimientos, empleadoId: selectEmpleado.value });
+  const r = resumenActual();
+  if (!r) return;
 
   $("metric-efectivo").textContent = formatearMoneda(r.porMetodo["Efectivo"]);
   $("metric-mp").textContent = formatearMoneda(r.porMetodo["Mercado Pago"]);
@@ -114,12 +129,12 @@ function renderResumen() {
   $("metric-neto").textContent = formatearMoneda(r.neto);
 
   renderTurnos(r.turnos);
-  renderTablaEgresos($("tabla-egresos-admin"), r.egresos);
+  btnExcel.disabled = false;
 }
 
 function renderTurnos(filas) {
   const tbody = $("tabla-turnos");
-  if (filas.length === 0) return filaVacia(tbody, 9, "No hay turnos en el período.");
+  if (filas.length === 0) return filaVacia(tbody, 10, "No hay turnos en el período.");
 
   tbody.replaceChildren(
     ...filas.map((t) => {
@@ -129,19 +144,99 @@ function renderTurnos(filas) {
         const clase = t.diferencia < 0 ? "text-danger" : "text-success";
         celdaDiferencia = h("td", { class: `num ${clase}` }, h("strong", {}, signo + formatearMoneda(t.diferencia)));
       }
+      const celdaCierre = t.cierre
+        ? h("td", {}, formatearFechaHora(t.cierre), t.cerradoPor ? h("small", { class: "text-muted d-block" }, `por ${t.cerradoPor}`) : null)
+        : h("td", {}, h("span", { class: "badge badge-abierto" }, "Abierto"));
+      const celdaAcciones = h(
+        "td",
+        { class: "acciones" },
+        t.abierto
+          ? h(
+              "button",
+              { type: "button", class: "btn btn-warning btn-sm", dataset: { cerrarTurno: t.id }, "aria-label": `Cerrar el turno de ${t.empleado}` },
+              icono("lock"),
+              " Cerrar",
+            )
+          : null,
+      );
       return h(
         "tr",
         {},
         h("td", {}, t.empleado),
         h("td", {}, formatearFechaHora(t.apertura)),
-        h("td", {}, t.cierre ? formatearFechaHora(t.cierre) : h("span", { class: "badge" }, "Abierto")),
+        celdaCierre,
         h("td", { class: "num" }, formatearMoneda(t.cajaInicial)),
         h("td", { class: "num" }, formatearMoneda(t.efectivo)),
         h("td", { class: "num" }, formatearMoneda(t.egresos)),
         h("td", { class: "num" }, formatearMoneda(t.esperado)),
         h("td", { class: "num" }, t.cajaFinal != null ? formatearMoneda(t.cajaFinal) : "-"),
         celdaDiferencia,
+        celdaAcciones,
       );
     }),
   );
+}
+
+// ---------- Exportar a Excel ----------
+
+async function exportarExcel() {
+  const r = resumenActual();
+  if (!r) return avisar("Sin datos", "Filtrá un período antes de exportar.");
+
+  const empleado = selectEmpleado.selectedOptions[0]?.textContent ?? "Todos los empleados";
+  const { nombreArchivo, hojas } = armarExcelResumen(r, { desde: movimientos.desde, hasta: movimientos.hasta, empleado });
+  await descargarExcel(nombreArchivo, hojas);
+  notificarExito("Excel descargado");
+}
+
+// ---------- Cierre de un turno por el admin ----------
+
+// Los valores se cargan con textContent en alAbrir (nunca interpolados en el HTML).
+const FORMULARIO_CIERRE = `
+  <div class="swal-form">
+    <p id="cierre-empleado" class="text-muted"></p>
+    <dl class="desglose">
+      <div><dt>Caja inicial</dt><dd id="cierre-inicial"></dd></div>
+      <div><dt>+ Ventas en efectivo</dt><dd id="cierre-efectivo"></dd></div>
+      <div><dt>− Egresos</dt><dd id="cierre-egresos"></dd></div>
+      <div class="desglose-total"><dt>= Efectivo esperado</dt><dd id="cierre-esperado"></dd></div>
+    </dl>
+    <label>Efectivo contado en caja
+      <input id="cierre-contado" type="number" min="0" step="0.01" class="swal2-input">
+    </label>
+  </div>`;
+
+async function cerrarTurnoDesdeAdmin(turnoId) {
+  const turno = movimientos?.turnos.find((t) => t.id === turnoId);
+  if (!turno) return;
+
+  // Lectura fresca: el empleado pudo haber vendido después de cargar el resumen.
+  const caja = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...(await obtenerMovimientosTurno(turno)) });
+
+  const datos = await formularioModal({
+    titulo: "Cerrar turno",
+    boton: "Cerrar turno",
+    contenido: FORMULARIO_CIERRE,
+    alAbrir: (popup) => {
+      const campo = (id) => popup.querySelector(`#cierre-${id}`);
+      campo("empleado").textContent = `${turno.empleadoNombre || turno.empleadoId} · abierto el ${formatearFechaHora(turno.fechaApertura)}`;
+      campo("inicial").textContent = formatearMoneda(caja.cajaInicial);
+      campo("efectivo").textContent = formatearMoneda(caja.efectivo);
+      campo("egresos").textContent = formatearMoneda(caja.egresos);
+      campo("esperado").textContent = formatearMoneda(caja.esperado);
+      campo("contado").value = caja.esperado.toFixed(2);
+    },
+    leer: (popup) => {
+      const contado = parsearMonto(popup.querySelector("#cierre-contado").value);
+      return contado >= 0 ? { contado } : "Ingresá el efectivo contado (puede ser 0).";
+    },
+  });
+  if (!datos) return;
+
+  await cerrarTurno(turno, datos.contado, sesion.usuario);
+  const diferencia = redondear(datos.contado - caja.esperado);
+  notificarExito(
+    diferencia === 0 ? "Turno cerrado sin diferencias" : `Turno cerrado · diferencia ${diferencia > 0 ? "+" : ""}${formatearMoneda(diferencia)}`,
+  );
+  await cargarResumen();
 }

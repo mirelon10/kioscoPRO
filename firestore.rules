@@ -1,9 +1,10 @@
 rules_version = '2';
 
-// Sin backend propio, estas reglas son la única barrera de seguridad:
-// todo lo que no esté permitido explícitamente acá queda denegado.
+// Todo lo que no esté permitido explícitamente acá queda denegado.
 //
 // Roles: custom claim `rol` ("admin" | "empleado"), asignado con scripts/set-rol.js.
+//
+// No hay servidor propio (plan Spark): estas reglas son la única barrera de seguridad.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -52,6 +53,8 @@ service cloud.firestore {
     }
 
     // Al cobrar, el empleado solo puede bajar el stock (nunca subirlo ni tocar precios).
+    // Limitación: las reglas no pueden recorrer los ítems de la venta para verificar que la
+    // cantidad descontada coincida exactamente; para eso haría falta un servidor (plan Blaze).
     function descuentoDeStock() {
       return esPersonal()
         && cambiaSolo(['stock'])
@@ -68,8 +71,18 @@ service cloud.firestore {
     }
 
     // ---------- Turnos ----------
-    // turnosActivos/{uid} funciona como candado: solo puede existir uno por empleado,
-    // y se crea/borra en el mismo batch que abre/cierra el turno.
+    // turnosActivos/{uid} funciona como candado: solo puede existir uno por empleado.
+    // Se crea en el mismo batch que abre el turno y se borra en el mismo batch que lo cierra.
+    // Cierra el propio empleado o un admin (por ejemplo, si el empleado se fue sin cerrar).
+
+    function puedeCerrar(empleadoId) {
+      return esPersonal() && (empleadoId == uid() || esAdmin());
+    }
+    // Al cerrar, el candado del empleado no puede seguir apuntando a este turno.
+    function candadoLiberado(empleadoId, turnoId) {
+      return !existsAfter(turnoActivo(empleadoId))
+        || getAfter(turnoActivo(empleadoId)).data.turnoId != turnoId;
+    }
 
     match /turnos/{turnoId} {
       // resource == null: la app empieza a escuchar el turno recién abierto antes de que llegue al
@@ -85,14 +98,16 @@ service cloud.firestore {
         && nuevo().fechaApertura == request.time
         && getAfter(turnoActivo(uid())).data.turnoId == turnoId;
 
-      allow update: if esPersonal()
-        && resource.data.empleadoId == uid()
+      allow update: if puedeCerrar(resource.data.empleadoId)
         && resource.data.estado == 'abierto'
-        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre'])
+        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre', 'cerradoPor', 'cerradoPorNombre'])
         && nuevo().estado == 'cerrado'
         && esMonto(nuevo().cajaFinal)
         && nuevo().fechaCierre == request.time
-        && !existsAfter(turnoActivo(uid()));
+        // cerradoPor es opcional para seguir aceptando el formato anterior, pero nunca falsificable.
+        && nuevo().get('cerradoPor', uid()) == uid()
+        && (!('cerradoPorNombre' in nuevo()) || esTexto(nuevo().cerradoPorNombre, 200))
+        && candadoLiberado(resource.data.empleadoId, turnoId);
 
       allow delete: if false;
     }
@@ -107,8 +122,7 @@ service cloud.firestore {
         && getAfter(turno(nuevo().turnoId)).data.empleadoId == uid()
         && getAfter(turno(nuevo().turnoId)).data.estado == 'abierto';
 
-      allow delete: if esPersonal()
-        && empleadoId == uid()
+      allow delete: if puedeCerrar(empleadoId)
         && getAfter(turno(resource.data.turnoId)).data.estado == 'cerrado';
 
       allow update: if false;
@@ -116,17 +130,30 @@ service cloud.firestore {
 
     // ---------- Ventas (inmutables) ----------
 
+    // En efectivo se guarda con cuánto pagó el cliente y el vuelto. Son opcionales (el formato
+    // anterior no los tiene), pero si vienen tienen que ser coherentes.
+    function pagoValido(v) {
+      let recibido = v.get('montoRecibido', null);
+      let vuelto = v.get('vuelto', null);
+      return recibido == null
+        ? vuelto == null
+        : v.tipo == 'productos' && v.metodoPago == 'Efectivo'
+          && esMonto(recibido) && recibido >= v.total && esMonto(vuelto);
+    }
+
     match /ventas/{ventaId} {
       allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
 
       allow create: if esPersonal()
-        && tieneExactamente(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp'])
+        && nuevo().keys().hasAll(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp'])
+        && nuevo().keys().hasOnly(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp', 'montoRecibido', 'vuelto'])
         && nuevo().tipo in ['productos', 'sube']
         && nuevo().empleadoId == uid()
         && esTexto(nuevo().empleadoNombre, 200)
         && nuevo().metodoPago in ['Efectivo', 'Mercado Pago', 'Tarjeta']
         && nuevo().items is list && nuevo().items.size() > 0 && nuevo().items.size() <= 100
         && esMonto(nuevo().total) && nuevo().total > 0
+        && pagoValido(nuevo())
         && nuevo().timestamp == request.time
         && nuevo().turnoId is string
         && turnoAbiertoPropio(nuevo().turnoId);

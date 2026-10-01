@@ -2,7 +2,7 @@ import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from ".
 import { $, mostrar } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
-import { adoptarTurnoSinCandado, escucharTurnoActivo } from "./data/turnos.js";
+import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
 import { sesion, actualizarSesion, esAdmin } from "./estado.js";
 import { avisar, mostrarError } from "./ui.js";
 import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
@@ -37,7 +37,7 @@ onAuthStateChanged(auth, async (usuario) => {
   detenerListeners();
 
   if (!usuario) {
-    actualizarSesion({ usuario: null, rol: null, turno: null, productos: [] });
+    actualizarSesion({ usuario: null, rol: null, turno: null, movimientosTurno: null, productos: [] });
     vaciarPos();
     return mostrarPantalla("login");
   }
@@ -118,13 +118,34 @@ function escucharDatos(uid, gen) {
     escucharProductos((productos) => vigente() && actualizarSesion({ productos }), alFallar("No se pudo cargar el catálogo.")),
   );
 
+  // Mientras haya un turno abierto se escuchan sus ventas y egresos (caja calculada en vivo).
+  let turnoEscuchado = null;
+  let dejarMovimientos = () => {};
+  desuscribir.push(() => dejarMovimientos());
+
+  const alCambiarTurno = (turno) => {
+    if (!vigente()) return;
+    if (turno?.id !== turnoEscuchado) {
+      turnoEscuchado = turno?.id ?? null;
+      dejarMovimientos();
+      dejarMovimientos = () => {};
+      actualizarSesion({ movimientosTurno: null });
+      if (turno) {
+        dejarMovimientos = escucharMovimientosTurno(
+          turno,
+          (movimientosTurno) => vigente() && actualizarSesion({ movimientosTurno }),
+          alFallar("No se pudieron cargar los movimientos del turno."),
+        );
+      }
+    }
+    actualizarSesion({ turno });
+  };
+
   adoptarTurnoSinCandado(uid)
     .catch((error) => console.error("No se pudo revisar turnos anteriores", error))
     .finally(() => {
       if (!vigente()) return;
-      desuscribir.push(
-        escucharTurnoActivo(uid, (turno) => vigente() && actualizarSesion({ turno }), alFallar("No se pudo cargar tu turno.")),
-      );
+      desuscribir.push(escucharTurnoActivo(uid, alCambiarTurno, alFallar("No se pudo cargar tu turno.")));
     });
 }
 

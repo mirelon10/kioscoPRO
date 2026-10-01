@@ -1,6 +1,7 @@
 import { redondear } from "../lib/dinero.js";
 import { aDate } from "../lib/fechas.js";
 import { METODOS_PAGO, normalizarVenta } from "./ventas.js";
+import { calcularCajaTurno } from "./caja.js";
 
 function enRango(fecha, desde, hasta) {
   return fecha != null && fecha >= desde && fecha <= hasta;
@@ -36,29 +37,27 @@ export function calcularResumen({ turnos, ventas, egresos, desde, hasta, emplead
   const totalEgresos = redondear(egresosDelRango.reduce((s, e) => s + (Number(e.monto) || 0), 0));
 
   const filasTurnos = turnosFiltrados.map((t) => {
-    const efectivo = redondear(
-      todasLasVentas
-        .filter((v) => v.turnoId === t.id && v.metodoPago === "Efectivo")
-        .reduce((s, v) => s + v.total, 0),
-    );
-    const egresosTurno = redondear(
-      todosLosEgresos.filter((e) => e.turnoId === t.id).reduce((s, e) => s + (Number(e.monto) || 0), 0),
-    );
-    const cajaInicial = Number(t.cajaInicial) || 0;
-    const esperado = redondear(cajaInicial + efectivo - egresosTurno);
+    const caja = calcularCajaTurno({
+      cajaInicial: t.cajaInicial,
+      ventas: todasLasVentas.filter((v) => v.turnoId === t.id),
+      egresos: todosLosEgresos.filter((e) => e.turnoId === t.id),
+    });
     const cerrado = t.estado === "cerrado" && t.cajaFinal != null;
 
     return {
       id: t.id,
+      empleadoId: t.empleadoId,
       empleado: t.empleadoNombre || t.empleadoId,
+      abierto: t.estado === "abierto",
       apertura: aDate(t.fechaApertura),
       cierre: aDate(t.fechaCierre),
-      cajaInicial,
+      cerradoPor: t.cerradoPorNombre && t.cerradoPor !== t.empleadoId ? t.cerradoPorNombre : null,
+      cajaInicial: caja.cajaInicial,
       cajaFinal: cerrado ? Number(t.cajaFinal) : null,
-      efectivo,
-      egresos: egresosTurno,
-      esperado,
-      diferencia: cerrado ? redondear(Number(t.cajaFinal) - esperado) : null,
+      efectivo: caja.efectivo,
+      egresos: caja.egresos,
+      esperado: caja.esperado,
+      diferencia: cerrado ? redondear(Number(t.cajaFinal) - caja.esperado) : null,
     };
   });
 

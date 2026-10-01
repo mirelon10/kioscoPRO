@@ -105,6 +105,16 @@
               <option value="Tarjeta">💳 Tarjeta</option>
             </select>
 
+            <div id="pago-efectivo" class="pago-efectivo mb-3">
+              <label for="input-paga-con" class="field-label">Paga con <small>(Enter en el buscador vacío salta acá)</small></label>
+              <input type="number" id="input-paga-con" class="input-modern input-lg" placeholder="$ 0,00"
+                     min="0" step="0.01" inputmode="decimal" autocomplete="off">
+              <div id="vuelto-fila" class="vuelto-fila" aria-live="polite">
+                <span id="vuelto-etiqueta">Vuelto</span>
+                <strong id="vuelto-monto">—</strong>
+              </div>
+            </div>
+
             <button type="button" id="btn-confirmar-venta" class="btn btn-success btn-block btn-lg mb-3" disabled>
               <i class="fa-solid fa-check-double" aria-hidden="true"></i> Cobrar venta
             </button>
@@ -139,8 +149,18 @@
           <h3>Turno en curso</h3>
           <p id="txt-fecha-apertura" class="text-muted"></p>
           <p id="aviso-turno-largo" class="form-error hidden">Tu turno lleva más de 24 h abierto. Cerralo y abrí uno nuevo.</p>
-          <label for="cajaFinal" class="field-label mt-3">Dinero contado en caja al cerrar</label>
+
+          <dl class="desglose mt-3" aria-label="Caja calculada del turno">
+            <div><dt>Caja inicial</dt><dd id="caja-inicial">—</dd></div>
+            <div><dt>+ Ventas en efectivo</dt><dd id="caja-efectivo">—</dd></div>
+            <div><dt>− Egresos</dt><dd id="caja-egresos">—</dd></div>
+            <div class="desglose-total"><dt>= Efectivo esperado</dt><dd id="caja-esperado">—</dd></div>
+          </dl>
+          <p id="caja-otros" class="text-muted"></p>
+
+          <label for="cajaFinal" class="field-label mt-3">Efectivo contado en caja <small>(precargado con el esperado; corregilo si contaste otra cosa)</small></label>
           <input type="number" id="cajaFinal" placeholder="$ 0,00" class="input-modern input-lg" min="0" step="0.01" inputmode="decimal" required>
+          <p id="caja-diferencia" class="diferencia-preview" aria-live="polite"></p>
           <button type="submit" class="btn btn-warning btn-lg mt-3">Cerrar turno</button>
         </form>
       </div>
@@ -158,7 +178,20 @@
           <button type="submit" class="btn btn-warning"><i class="fa-solid fa-minus" aria-hidden="true"></i> Descontar de caja</button>
         </form>
       </div>
-      <div class="card">
+      <!-- Egresos del turno abierto (cualquier usuario con turno) -->
+      <div id="egresos-turno" class="card mb-4 hidden">
+        <h4 class="mb-3">Egresos de tu turno</h4>
+        <div class="tabla-scroll">
+          <table class="table-modern">
+            <thead><tr><th>Hora</th><th>Motivo</th><th class="num">Monto</th></tr></thead>
+            <tbody id="tabla-egresos-turno"></tbody>
+          </table>
+        </div>
+        <p class="total-tabla">Total: <span id="total-egresos-turno">$ 0,00</span></p>
+      </div>
+
+      <!-- Historial por fecha: solo administradores -->
+      <div id="egresos-historial" class="card hidden">
         <h4 class="mb-3">Buscar egresos por fecha</h4>
         <form id="form-filtro-egresos" class="admin-filters mb-3">
           <label for="egresos-desde" class="sr-only">Desde</label>
@@ -207,6 +240,7 @@
             <option value="">Todos los empleados</option>
           </select>
           <button type="submit" class="btn btn-primary"><i class="fa-solid fa-filter" aria-hidden="true"></i> Filtrar</button>
+          <button type="button" id="btn-exportar-excel" class="btn btn-excel" disabled><i class="fa-solid fa-file-excel" aria-hidden="true"></i> Exportar a Excel</button>
         </form>
 
         <div class="stats-grid mb-4">
@@ -221,25 +255,15 @@
           <div class="stat-card success"><h5>Neto (ventas − egresos)</h5><h3 id="metric-neto">$ 0,00</h3></div>
         </div>
 
-        <div class="card mb-4">
+        <div class="card">
           <h4 class="mb-3">Turnos del período</h4>
           <div class="tabla-scroll">
             <table class="table-modern">
               <thead><tr>
                 <th>Empleado</th><th>Apertura</th><th>Cierre</th><th class="num">Inicial</th><th class="num">Efectivo</th>
-                <th class="num">Egresos</th><th class="num">Esperado</th><th class="num">Final</th><th class="num">Diferencia</th>
+                <th class="num">Egresos</th><th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th><th></th>
               </tr></thead>
               <tbody id="tabla-turnos"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <h4 class="mb-3">Egresos del período</h4>
-          <div class="tabla-scroll">
-            <table class="table-modern">
-              <thead><tr><th>Fecha / hora</th><th>Empleado</th><th>Motivo</th><th class="num">Monto</th></tr></thead>
-              <tbody id="tabla-egresos-admin"></tbody>
             </table>
           </div>
         </div>

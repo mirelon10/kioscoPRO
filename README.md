@@ -1,10 +1,11 @@
 # Kiosco Pro
 
-Sistema de gestión para kiosco: ventas (POS), caja por turnos, egresos, inventario y panel de administración.
+Sistema de gestión para kiosco: ventas (POS) con cálculo de vuelto, caja por turnos, egresos, inventario
+y panel de administración con exportación a Excel.
 
 - **Frontend:** HTML + JavaScript (módulos ES nativos, sin build), publicado en **Netlify**.
-- **Backend:** no hay servidor propio. La app habla directo con **Firebase Auth** y **Firestore**,
-  y la seguridad la imponen las reglas de [`firestore.rules`](firestore.rules).
+- **Backend:** no hay servidor propio (plan gratuito Spark de Firebase). La app habla directo con
+  **Firebase Auth** y **Firestore**, y la seguridad la imponen las reglas de [`firestore.rules`](firestore.rules).
 
 ## Estructura
 
@@ -15,11 +16,11 @@ public/                  ← lo que publica Netlify
   js/
     main.js              ← autenticación, navegación y ciclo de vida de los listeners
     firebase.js          ← único punto de acceso al SDK (versión + configuración)
-    estado.js            ← estado de la sesión (usuario, rol, turno, catálogo)
+    estado.js            ← estado de la sesión (usuario, rol, turno, movimientos del turno, catálogo)
     ui.js                ← diálogos, toasts y manejo de botones ocupados
-    lib/                 ← utilidades puras: dinero, fechas, DOM
+    lib/                 ← utilidades: dinero, fechas, DOM, Excel
     core/                ← reglas de negocio puras (testeables con Node)
-    data/                ← acceso a Firestore (lo que antes hacían los controllers Java)
+    data/                ← acceso a Firestore
     views/               ← una vista por sección: pos, turno, egresos, admin, stock
 firestore.rules          ← seguridad (la parte más importante)
 firestore.indexes.json   ← índices compuestos
@@ -31,30 +32,22 @@ tests/rules/             ← tests de las reglas contra el emulador de Firestore
 
 ## Puesta en marcha
 
-### 1. Revocar la clave filtrada (urgente)
+### 1. Requisitos
 
-La clave `serviceAccountKey.json` quedó en el historial de Git (commit `1699a49`). En la
-[consola de Google Cloud](https://console.cloud.google.com/iam-admin/serviceaccounts?project=kioscopro-db07e)
-→ cuenta de servicio de Firebase → **Claves**, eliminá la clave vieja. Si necesitás una nueva para
-`set-rol`, generala y guardala **fuera** del repositorio.
-
-### 2. Instalar herramientas
-
-Requisitos: Node 20+ y, para los tests de reglas y los emuladores, **Java 21+**.
+Node 20+ y, para los emuladores y los tests de reglas, **Java 21+**.
 
 ```bash
 npm install
-npx firebase login
+npx firebase login   # en una terminal propia: el login es interactivo
 ```
 
-### 3. Asignar roles
+### 2. Asignar roles
 
 Los roles viven en el token del usuario (custom claim `rol`), no en el código. Primero creá los usuarios
-en Firebase Console → Authentication. Después:
+en Firebase Console → Authentication. Después, con la clave de cuenta de servicio **fuera** del repositorio:
 
-```bash
-# PowerShell:  $env:GOOGLE_APPLICATION_CREDENTIALS="C:\claves\kiosco-admin.json"
-export GOOGLE_APPLICATION_CREDENTIALS=/ruta/fuera/del/repo/kiosco-admin.json
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\claves\kiosco-admin.json"
 npm run set-rol -- nachomiretti@gmail.com admin
 npm run set-rol -- empleado@ejemplo.com empleado
 npm run set-rol -- ex-empleado@ejemplo.com ninguno   # quita el acceso
@@ -62,22 +55,21 @@ npm run set-rol -- ex-empleado@ejemplo.com ninguno   # quita el acceso
 
 Un usuario sin rol no puede entrar.
 
-### 4. Publicar reglas e índices
+### 3. Publicar
 
 ```bash
-npm test              # primero, verificar que todo pase
-npm run deploy:rules
+npm test               # unitarios + reglas
+npm run deploy:rules   # reglas e índices
 ```
 
-> Hasta que publiques las reglas, la base sigue con las reglas que tenga hoy en la consola.
+El frontend lo publica Netlify solo al mergear a `main`. Si un cambio agrega campos nuevos a los
+documentos, publicá primero las reglas (que aceptan el formato nuevo) y después mergeá.
 
-### 5. Publicar en Netlify
+### 4. Netlify
 
-Conectá el repositorio en Netlify. No hace falta configurar nada más: `netlify.toml` indica que se
-publica la carpeta `public/` y no hay comando de build.
-
-Recomendado: en Google Cloud → APIs y servicios → Credenciales, restringí la API key web a los
-dominios de Netlify (referentes HTTP).
+`netlify.toml` indica que se publica la carpeta `public/` y no hay comando de build.
+La API key web está restringida por referente HTTP: si agregás un dominio (por ejemplo, *deploy previews*
+`https://*--kioscoproo.netlify.app/*`), sumalo en Google Cloud → Credenciales.
 
 ## Desarrollo local
 
@@ -99,33 +91,51 @@ npm run test:rules   # reglas de seguridad contra el emulador (requiere Java 21+
 npm test             # ambos
 ```
 
+## Cómo funciona
+
+**Cobro:** el cajero escanea productos (Enter), y con Enter en el buscador vacío salta a *Paga con*. Ahí
+escribe con cuánto paga el cliente y ve el vuelto en vivo; con Enter cobra. En efectivo no se puede cobrar si
+el pago no alcanza. Al cobrar, una transacción vuelve a leer los precios y el stock reales, recalcula el
+total y el vuelto, descuenta el stock y guarda la venta. Si dos cajas venden la última unidad a la vez,
+una de las dos falla en lugar de dejar stock negativo.
+
+**Turnos:** se abren con el efectivo inicial. Mientras el turno está abierto, la pantalla de *Caja y turnos*
+muestra en vivo `caja inicial + ventas en efectivo − egresos = efectivo esperado`. Al cerrar, el monto
+contado viene precargado con el esperado; si el empleado contó otra cosa, lo corrige y queda registrada
+la diferencia (faltante/sobrante). El esperado no se guarda: el panel lo recalcula siempre desde las
+ventas y los egresos del turno.
+
+**Cierre forzado:** si un empleado se va sin cerrar, el admin lo cierra desde *Administración → Turnos del
+período* (botón *Cerrar*). Queda registrado quién lo cerró.
+
+**Egresos:** cada empleado ve los egresos de su turno. La búsqueda por fecha es solo para administradores.
+
+**Exportar a Excel:** desde el resumen de caja, con tres hojas (Resumen, Turnos, Egresos). Los montos y las
+fechas son valores reales de Excel, se pueden sumar y filtrar.
+
 ## Modelo de datos
 
 | Colección | Documento | Quién escribe |
 |---|---|---|
 | `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El empleado solo puede **bajar** `stock` al cobrar. |
-| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura, cajaFinal?, fechaCierre?` | El propio empleado (abrir/cerrar). |
-| `turnosActivos/{uid}` | `turnoId` | Candado: garantiza **un solo turno abierto** por empleado. Se crea y borra en el mismo batch que el turno. |
-| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, timestamp` | Empleado con turno abierto. **Inmutables.** |
+| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
+| `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
+| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
 | `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, fecha` | Empleado con turno abierto. **Inmutables.** |
 
 Las fechas siempre las pone el servidor (`serverTimestamp`) y las reglas lo verifican.
 
-**Venta:** se hace en una transacción que lee el stock y los precios vigentes, valida, descuenta el stock
-y guarda la venta. Si dos cajas venden la última unidad a la vez, una falla en lugar de dejar stock negativo.
-
-**Recarga SUBE:** es una venta `tipo: "sube"` cobrada con el método elegido. Suma a la caja (efectivo,
-Mercado Pago o tarjeta) y además se muestra desglosada en el panel.
-
-**Diferencia de caja:** `cajaFinal − (cajaInicial + ventas en efectivo − egresos)`.
+**Recarga SUBE:** es una venta `tipo: "sube"` cobrada con el método elegido. Si es en efectivo, suma a la
+caja del turno.
 
 ## Limitaciones conocidas
 
-- Las reglas no pueden recorrer listas: verifican que el empleado solo **baje** el stock y que la venta
-  tenga un turno abierto propio, pero no que la cantidad descontada coincida con los ítems. Si en algún
-  momento necesitás esa garantía, el paso siguiente es mover el cobro a una Cloud Function.
+- Sin servidor propio, las reglas verifican que el empleado solo **baje** el stock y que la venta sea de su
+  turno abierto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
+  exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
+  servidor (Cloud Functions, que necesitan el plan Blaze).
 - Cobrar requiere conexión (las transacciones no funcionan offline). El catálogo sí carga desde la caché local.
+- La recarga SUBE no calcula vuelto (solo la venta de productos).
 - Datos anteriores a la migración: los productos con `codigoBarra` y las ventas SUBE viejas
-  (`metodoPago: "Sube"`) se leen bien y se normalizan al editarlos. Los turnos abiertos con el sistema
-  viejo se reconocen automáticamente al iniciar sesión. Si hubiera egresos muy viejos guardados
-  con el campo `timestamp` en lugar de `fecha`, no aparecen en los filtros por fecha.
+  (`metodoPago: "Sube"`) se leen bien y se normalizan al editarlos. Si hubiera egresos muy viejos
+  guardados con el campo `timestamp` en lugar de `fecha`, no aparecen en los filtros por fecha.

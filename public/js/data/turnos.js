@@ -92,13 +92,54 @@ export async function abrirTurno(usuario, cajaInicial) {
   return turnoRef.id;
 }
 
-export async function cerrarTurno(uid, turnoId, cajaFinal) {
+/**
+ * Cierra un turno guardando el efectivo contado y quién lo cerró, y libera el candado.
+ * El admin puede cerrar el turno de otro empleado (las reglas lo verifican).
+ * El esperado no se guarda: el panel lo recalcula siempre desde las ventas y egresos.
+ */
+export async function cerrarTurno(turno, cajaContada, usuario) {
   const batch = writeBatch(db);
-  batch.update(doc(turnosCol, turnoId), {
+  batch.update(doc(turnosCol, turno.id), {
     estado: "cerrado",
-    cajaFinal,
+    cajaFinal: cajaContada,
     fechaCierre: serverTimestamp(),
+    cerradoPor: usuario.uid,
+    cerradoPorNombre: usuario.email,
   });
-  batch.delete(candado(uid));
+  // Solo si el candado apunta a este turno (un turno viejo puede no tenerlo).
+  const candadoSnap = await getDoc(candado(turno.empleadoId));
+  if (candadoSnap.exists() && candadoSnap.data().turnoId === turno.id) batch.delete(candado(turno.empleadoId));
   await batch.commit();
+}
+
+// ---------- Ventas y egresos de un turno (para calcular la caja) ----------
+
+// Se filtra también por empleadoId: las reglas solo dejan al empleado leer lo suyo.
+const delTurno = (coleccion, turno) =>
+  query(collection(db, coleccion), where("turnoId", "==", turno.id), where("empleadoId", "==", turno.empleadoId));
+
+const datosDe = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
+
+/**
+ * Escucha en tiempo real las ventas y egresos del turno abierto: el monto a declarar
+ * al cerrar y la lista de egresos del empleado se actualizan solos.
+ * @returns {() => void} función para dejar de escuchar
+ */
+export function escucharMovimientosTurno(turno, alCambiar, alFallar) {
+  const movimientos = { ventas: null, egresos: null };
+  const avisar = () => {
+    if (movimientos.ventas && movimientos.egresos) alCambiar({ ...movimientos });
+  };
+  const dejarVentas = onSnapshot(delTurno("ventas", turno), (s) => { movimientos.ventas = datosDe(s); avisar(); }, alFallar);
+  const dejarEgresos = onSnapshot(delTurno("egresos", turno), (s) => { movimientos.egresos = datosDe(s); avisar(); }, alFallar);
+  return () => {
+    dejarVentas();
+    dejarEgresos();
+  };
+}
+
+/** Lectura única, para que el admin vea la caja de un turno ajeno antes de cerrarlo. */
+export async function obtenerMovimientosTurno(turno) {
+  const [ventas, egresos] = await Promise.all([getDocs(delTurno("ventas", turno)), getDocs(delTurno("egresos", turno))]);
+  return { ventas: datosDe(ventas), egresos: datosDe(egresos) };
 }
