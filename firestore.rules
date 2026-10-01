@@ -1,0 +1,155 @@
+rules_version = '2';
+
+// Sin backend propio, estas reglas son la única barrera de seguridad:
+// todo lo que no esté permitido explícitamente acá queda denegado.
+//
+// Roles: custom claim `rol` ("admin" | "empleado"), asignado con scripts/set-rol.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+
+    function autenticado() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function rol() { return request.auth.token.get('rol', ''); }
+    function esAdmin() { return autenticado() && rol() == 'admin'; }
+    function esPersonal() { return autenticado() && rol() in ['admin', 'empleado']; }
+
+    function nuevo() { return request.resource.data; }
+    function cambiaSolo(campos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+    }
+    function tieneExactamente(campos) {
+      return nuevo().keys().hasAll(campos) && nuevo().keys().hasOnly(campos);
+    }
+
+    function esMonto(v) { return v is number && v >= 0 && v <= 100000000; }
+    function esTexto(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
+
+    function turnoActivo(empleadoId) {
+      return /databases/$(database)/documents/turnosActivos/$(empleadoId);
+    }
+    function turno(turnoId) {
+      return /databases/$(database)/documents/turnos/$(turnoId);
+    }
+    function turnoAbiertoPropio(turnoId) {
+      let t = get(turno(turnoId)).data;
+      return t.empleadoId == uid() && t.estado == 'abierto';
+    }
+
+    // ---------- Productos ----------
+
+    function productoValido(p) {
+      return p.keys().hasAll(['nombre', 'precio', 'stock'])
+        && p.keys().hasOnly(['codigo', 'nombre', 'categoria', 'precioCompra', 'margen', 'precio', 'stock'])
+        && esTexto(p.nombre, 120)
+        && esMonto(p.precio)
+        && p.stock is int && p.stock >= 0
+        && p.get('codigo', '') is string && p.get('codigo', '').size() <= 64
+        && p.get('categoria', '') is string && p.get('categoria', '').size() <= 60
+        && esMonto(p.get('precioCompra', 0))
+        && p.get('margen', 0) is number && p.get('margen', 0) >= 0 && p.get('margen', 0) <= 10000;
+    }
+
+    // Al cobrar, el empleado solo puede bajar el stock (nunca subirlo ni tocar precios).
+    function descuentoDeStock() {
+      return esPersonal()
+        && cambiaSolo(['stock'])
+        && nuevo().stock is int
+        && nuevo().stock >= 0
+        && nuevo().stock < resource.data.stock;
+    }
+
+    match /productos/{productoId} {
+      allow read: if esPersonal();
+      allow create: if esAdmin() && productoValido(nuevo());
+      allow update: if (esAdmin() && productoValido(nuevo())) || descuentoDeStock();
+      allow delete: if esAdmin();
+    }
+
+    // ---------- Turnos ----------
+    // turnosActivos/{uid} funciona como candado: solo puede existir uno por empleado,
+    // y se crea/borra en el mismo batch que abre/cierra el turno.
+
+    match /turnos/{turnoId} {
+      // resource == null: la app empieza a escuchar el turno recién abierto antes de que llegue al
+      // servidor. Leer un documento inexistente no expone datos.
+      allow read: if esAdmin() || (esPersonal() && (resource == null || resource.data.empleadoId == uid()));
+
+      allow create: if esPersonal()
+        && tieneExactamente(['empleadoId', 'empleadoNombre', 'cajaInicial', 'estado', 'fechaApertura'])
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && nuevo().estado == 'abierto'
+        && esMonto(nuevo().cajaInicial)
+        && nuevo().fechaApertura == request.time
+        && getAfter(turnoActivo(uid())).data.turnoId == turnoId;
+
+      allow update: if esPersonal()
+        && resource.data.empleadoId == uid()
+        && resource.data.estado == 'abierto'
+        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre'])
+        && nuevo().estado == 'cerrado'
+        && esMonto(nuevo().cajaFinal)
+        && nuevo().fechaCierre == request.time
+        && !existsAfter(turnoActivo(uid()));
+
+      allow delete: if false;
+    }
+
+    match /turnosActivos/{empleadoId} {
+      allow read: if esAdmin() || (esPersonal() && empleadoId == uid());
+
+      allow create: if esPersonal()
+        && empleadoId == uid()
+        && tieneExactamente(['turnoId'])
+        && nuevo().turnoId is string
+        && getAfter(turno(nuevo().turnoId)).data.empleadoId == uid()
+        && getAfter(turno(nuevo().turnoId)).data.estado == 'abierto';
+
+      allow delete: if esPersonal()
+        && empleadoId == uid()
+        && getAfter(turno(resource.data.turnoId)).data.estado == 'cerrado';
+
+      allow update: if false;
+    }
+
+    // ---------- Ventas (inmutables) ----------
+
+    match /ventas/{ventaId} {
+      allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
+
+      allow create: if esPersonal()
+        && tieneExactamente(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp'])
+        && nuevo().tipo in ['productos', 'sube']
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && nuevo().metodoPago in ['Efectivo', 'Mercado Pago', 'Tarjeta']
+        && nuevo().items is list && nuevo().items.size() > 0 && nuevo().items.size() <= 100
+        && esMonto(nuevo().total) && nuevo().total > 0
+        && nuevo().timestamp == request.time
+        && nuevo().turnoId is string
+        && turnoAbiertoPropio(nuevo().turnoId);
+
+      allow update, delete: if false;
+    }
+
+    // ---------- Egresos (inmutables) ----------
+
+    match /egresos/{egresoId} {
+      allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
+
+      allow create: if esPersonal()
+        && tieneExactamente(['turnoId', 'empleadoId', 'empleadoNombre', 'monto', 'motivo', 'fecha'])
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && esMonto(nuevo().monto) && nuevo().monto > 0
+        && esTexto(nuevo().motivo, 200)
+        && nuevo().fecha == request.time
+        && nuevo().turnoId is string
+        && turnoAbiertoPropio(nuevo().turnoId);
+
+      allow update, delete: if false;
+    }
+  }
+}
