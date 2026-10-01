@@ -7,6 +7,8 @@ import { armarVenta, normalizarVenta } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
 import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias } from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
+import { calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
+import { armarExcelResumen } from "../../public/js/core/exportacion.js";
 
 describe("dinero", () => {
   test("redondea a centavos sin errores de punto flotante", () => {
@@ -185,5 +187,77 @@ describe("mensajeDeError", () => {
     assert.match(mensajeDeError({ code: "permission-denied" }), /permisos/);
     assert.equal(mensajeDeError(new ErrorNegocio("Sin stock")), "Sin stock");
     assert.equal(mensajeDeError(new Error("x"), "Por defecto"), "Por defecto");
+  });
+});
+
+describe("calcularCajaTurno", () => {
+  test("caja inicial + efectivo (incluida SUBE vieja) − egresos; MP y tarjeta van aparte", () => {
+    const caja = calcularCajaTurno({
+      cajaInicial: 1000,
+      ventas: [
+        { metodoPago: "Efectivo", total: 1500.1 },
+        { metodoPago: "Sube", total: 200.2 }, // formato viejo: efectivo
+        { metodoPago: "Tarjeta", total: 999 },
+        { tipo: "sube", metodoPago: "Mercado Pago", total: 500 },
+      ],
+      egresos: [{ monto: 300 }, { monto: "50" }],
+    });
+    assert.deepEqual(caja, { cajaInicial: 1000, efectivo: 1700.3, otrosMedios: 1499, egresos: 350, esperado: 2350.3, cantidadVentas: 4 });
+  });
+
+  test("turno sin movimientos: lo esperado es la caja inicial", () => {
+    assert.equal(calcularCajaTurno({ cajaInicial: 500, ventas: [], egresos: [] }).esperado, 500);
+  });
+});
+
+describe("calcularVuelto", () => {
+  test("calcula el vuelto en centavos exactos", () => {
+    assert.deepEqual(calcularVuelto(2600.3, 3000), { vuelto: 399.7, falta: 0 });
+    assert.deepEqual(calcularVuelto(100, 100), { vuelto: 0, falta: 0 });
+  });
+
+  test("informa cuánto falta si no alcanza, y nada si no hay monto", () => {
+    assert.deepEqual(calcularVuelto(2600, 2000), { vuelto: null, falta: 600 });
+    assert.deepEqual(calcularVuelto(100, NaN), { vuelto: null, falta: null });
+  });
+});
+
+describe("armarExcelResumen", () => {
+  const desde = new Date(2026, 9, 1);
+  const hasta = new Date(2026, 9, 2, 23, 59);
+  const resumen = {
+    porMetodo: { Efectivo: 2600, "Mercado Pago": 500, Tarjeta: 0 },
+    sube: 500,
+    totalVentas: 3100,
+    totalEgresos: 301,
+    neto: 2799,
+    turnos: [
+      { empleado: "ana@k.com", abierto: false, apertura: desde, cierre: hasta, cerradoPor: "admin@k.com", cajaInicial: 1000, efectivo: 2600, egresos: 301, esperado: 3299, cajaFinal: 3290, diferencia: -9 },
+      { empleado: "beto@k.com", abierto: true, apertura: desde, cierre: null, cerradoPor: null, cajaInicial: 0, efectivo: 0, egresos: 0, esperado: 0, cajaFinal: null, diferencia: null },
+    ],
+    egresos: [{ fecha: { toDate: () => desde }, empleadoNombre: "ana@k.com", motivo: "Proveedor", monto: 301 }],
+  };
+
+  test("nombra el archivo con el período y arma las tres hojas", () => {
+    const { nombreArchivo, hojas } = armarExcelResumen(resumen, { desde, hasta });
+    assert.equal(nombreArchivo, "resumen-caja_2026-10-01_a_2026-10-02.xlsx");
+    assert.deepEqual(hojas.map((h) => h.nombre), ["Resumen", "Turnos", "Egresos"]);
+  });
+
+  test("las filas llevan números y fechas reales (no texto) para poder sumar en Excel", () => {
+    const [res, turnos, egresos] = armarExcelResumen(resumen, { desde, hasta, empleado: "ana@k.com" }).hojas;
+    assert.deepEqual(res.filas.find((f) => f[0] === "Neto (ventas − egresos)"), ["Neto (ventas − egresos)", 2799]);
+    assert.deepEqual(res.filas[2], ["Empleado", "ana@k.com"]);
+    assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2600, 301, 3299, 3290, -9, "admin@k.com"]);
+    assert.deepEqual(turnos.filas[2].slice(2, 4), ["", "Abierto"]);
+    assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", 301]);
+  });
+});
+
+describe("mensajeDeError con Cloud Functions", () => {
+  test("muestra el mensaje del servidor y oculta los errores de conexión", () => {
+    assert.equal(mensajeDeError({ code: "functions/failed-precondition", message: "Stock insuficiente de Agua (quedan 0)." }), "Stock insuficiente de Agua (quedan 0).");
+    assert.match(mensajeDeError({ code: "functions/internal", message: "internal" }), /conectar/);
+    assert.match(mensajeDeError({ code: "functions/unavailable", message: "x" }), /conectar/);
   });
 });

@@ -1,0 +1,14 @@
+{
+  "name": "kiosco-pro-functions",
+  "private": true,
+  "description": "Cloud Functions de Kiosco Pro: cobro, recarga SUBE y cierre de turno",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0"
+  }
+}

@@ -13,14 +13,10 @@ export function registrarEgreso({ turnoId, usuario, monto, motivo }) {
   });
 }
 
-/**
- * Egresos entre dos fechas. Si se pasa empleadoId, filtra en el servidor
- * (obligatorio para empleados: las reglas solo les dejan leer los propios).
- */
-export async function listarEgresos({ desde, hasta, empleadoId = null }) {
-  const filtros = [where("fecha", ">=", desde), where("fecha", "<=", hasta), orderBy("fecha", "desc")];
-  if (empleadoId) filtros.unshift(where("empleadoId", "==", empleadoId));
-
-  const snap = await getDocs(query(egresosCol, ...filtros));
+/** Egresos de todos los empleados entre dos fechas (solo admin: las reglas lo exigen). */
+export async function listarEgresos({ desde, hasta }) {
+  const snap = await getDocs(
+    query(egresosCol, where("fecha", ">=", desde), where("fecha", "<=", hasta), orderBy("fecha", "desc")),
+  );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }

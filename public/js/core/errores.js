@@ -21,7 +21,24 @@ const MENSAJES_FIREBASE = {
   "auth/network-request-failed": "Sin conexión. Revisá internet.",
 };
 
+// Errores de Cloud Functions cuyo mensaje lo escribe nuestro servidor para el usuario.
+const CODIGOS_FUNCIONES_CON_MENSAJE = [
+  "functions/failed-precondition",
+  "functions/invalid-argument",
+  "functions/permission-denied",
+  "functions/unauthenticated",
+  "functions/internal",
+];
+
 export function mensajeDeError(error, porDefecto = "Ocurrió un error inesperado.") {
   if (error instanceof ErrorNegocio) return error.message;
-  return MENSAJES_FIREBASE[error?.code] ?? porDefecto;
+  const codigo = error?.code ?? "";
+  // "internal" a secas es el SDK diciendo que no pudo hablar con la función (sin internet, CORS...).
+  if (CODIGOS_FUNCIONES_CON_MENSAJE.includes(codigo) && error.message && error.message !== "internal") {
+    return error.message;
+  }
+  if (codigo === "functions/internal" || codigo === "functions/unavailable" || codigo === "functions/deadline-exceeded") {
+    return "No se pudo conectar con el servidor. Revisá internet y volvé a intentar.";
+  }
+  return MENSAJES_FIREBASE[codigo] ?? porDefecto;
 }

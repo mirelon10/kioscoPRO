@@ -10,16 +10,16 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-    # Solo se permite cargar código de este sitio, del SDK de Firebase (gstatic) y de SweetAlert (jsdelivr).
+    # Solo se permite cargar código de este sitio, del SDK de Firebase (gstatic), SweetAlert (jsdelivr) y SheetJS (Excel).
     # Si agregás otro servicio de Firebase o una librería nueva, sumá su dominio acá.
     # Las barras al final de línea hacen que TOML lo una en un solo renglón.
     Content-Security-Policy = """\
       default-src 'self'; \
-      script-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net; \
+      script-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; \
       style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; \
       font-src 'self' https://cdnjs.cloudflare.com; \
       img-src 'self' data:; \
-      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; \
+      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://southamerica-east1-kioscopro-db07e.cloudfunctions.net; \
       frame-src https://kioscopro-db07e.firebaseapp.com; \
       object-src 'none'; \
       base-uri 'self'; \

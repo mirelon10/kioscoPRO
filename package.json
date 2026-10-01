@@ -2,18 +2,22 @@
   "name": "kiosco-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "Sistema de gestión para kiosco: Firebase (Auth + Firestore) y Netlify",
+  "description": "Sistema de gestión para kiosco: Firebase (Auth + Firestore + Cloud Functions) y Netlify",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "npm --prefix functions install --no-fund --no-audit",
+    "compartido": "node scripts/copiar-compartido.js",
     "dev": "serve public -l 3000",
-    "emuladores": "firebase emulators:start --only auth,firestore --project demo-kiosco",
-    "test": "npm run test:unit && npm run test:rules",
+    "emuladores": "npm run compartido && firebase emulators:start --only auth,firestore,functions --project demo-kiosco",
+    "test": "npm run test:unit && npm run test:rules && npm run test:functions",
     "test:unit": "node --test \"tests/unit/**/*.test.js\"",
     "test:rules": "firebase emulators:exec --only firestore --project demo-kiosco \"node --test tests/rules/*.test.js\"",
+    "test:functions": "npm run compartido && firebase emulators:exec --only auth,firestore,functions --project demo-kiosco \"node --test tests/functions/*.test.js\"",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:functions": "firebase deploy --only functions",
     "set-rol": "node scripts/set-rol.js"
   },
   "devDependencies": {

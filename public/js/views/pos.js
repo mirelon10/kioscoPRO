@@ -1,6 +1,7 @@
 import { $, h, icono, mostrar } from "../lib/dom.js";
 import { formatearMoneda, parsearMonto, redondear } from "../lib/dinero.js";
 import { buscarCoincidencias, buscarExacto } from "../core/productos.js";
+import { calcularVuelto } from "../core/caja.js";
 import { registrarVenta, registrarRecargaSube } from "../data/ventas.js";
 import { sesion, alCambiarSesion } from "../estado.js";
 import { avisar, conBoton, notificarExito } from "../ui.js";
@@ -13,6 +14,11 @@ const sugerencias = $("sugerencias-pos");
 const contenedorCarrito = $("carrito-items");
 const btnCobrar = $("btn-confirmar-venta");
 const selectMetodo = $("select-metodo-pago");
+const inputPagaCon = $("input-paga-con");
+
+const esEfectivo = () => selectMetodo.value === "Efectivo";
+/** Total del carrito tal como se ve en pantalla (el servidor lo recalcula al cobrar). */
+let totalCarrito = 0;
 
 const productoPorId = (id) => sesion.productos.find((p) => p.id === id);
 
@@ -40,6 +46,14 @@ export function iniciarPos() {
 
   // conBoton rehabilita el botón al terminar; renderCarrito lo vuelve a deshabilitar si quedó vacío.
   btnCobrar.addEventListener("click", () => conBoton(btnCobrar, cobrar).then(renderCarrito));
+
+  selectMetodo.addEventListener("change", renderPago);
+  inputPagaCon.addEventListener("input", renderPago);
+  inputPagaCon.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!btnCobrar.disabled) btnCobrar.click();
+  });
   $("form-sube").addEventListener("submit", (e) => {
     e.preventDefault();
     conBoton($("btn-cobrar-sube"), cargarSube);
@@ -54,6 +68,7 @@ export function iniciarPos() {
 export function vaciarPos() {
   carrito.clear();
   buscador.value = "";
+  inputPagaCon.value = "";
   cerrarSugerencias();
   renderCarrito();
 }
@@ -70,7 +85,11 @@ function alPresionarTecla(e) {
   e.preventDefault();
 
   const termino = buscador.value;
-  if (!termino.trim()) return;
+  // Enter con el buscador vacío: terminó de cargar productos, pasa al cobro.
+  if (!termino.trim()) {
+    if (carrito.size > 0) (esEfectivo() ? inputPagaCon : btnCobrar).focus();
+    return;
+  }
 
   // Lector de código de barras: escribe el código y manda Enter.
   const coincidencias = buscarCoincidencias(sesion.productos, termino);
@@ -187,9 +206,31 @@ function renderCarrito() {
     );
   }
 
+  totalCarrito = total;
   $("cart-total").textContent = formatearMoneda(total);
-  btnCobrar.disabled = lineas.length === 0 || !sesion.turno;
   mostrar($("aviso-sin-turno"), !sesion.turno);
+  renderPago();
+}
+
+/** Muestra el vuelto (o lo que falta) y habilita el cobro solo si el pago alcanza. */
+function renderPago() {
+  mostrar($("pago-efectivo"), esEfectivo());
+
+  const fila = $("vuelto-fila");
+  const pagaCon = parsearMonto(inputPagaCon.value);
+  const { vuelto, falta } = calcularVuelto(totalCarrito, pagaCon);
+  const pagoIncompleto = esEfectivo() && (vuelto === null || totalCarrito === 0);
+
+  fila.classList.toggle("falta", falta > 0);
+  if (falta > 0) {
+    $("vuelto-etiqueta").textContent = "Falta";
+    $("vuelto-monto").textContent = formatearMoneda(falta);
+  } else {
+    $("vuelto-etiqueta").textContent = "Vuelto";
+    $("vuelto-monto").textContent = vuelto === null || totalCarrito === 0 ? "—" : formatearMoneda(vuelto);
+  }
+
+  btnCobrar.disabled = carrito.size === 0 || !sesion.turno || pagoIncompleto;
 }
 
 // ---------- Cobro ----------
@@ -198,15 +239,25 @@ async function cobrar() {
   if (!sesion.turno) return avisar("Turno cerrado", "Abrí un turno antes de cobrar.");
   if (carrito.size === 0) return;
 
-  const { total } = await registrarVenta({
+  const montoRecibido = esEfectivo() ? parsearMonto(inputPagaCon.value) : null;
+  if (esEfectivo() && !(montoRecibido >= totalCarrito)) {
+    return avisar("Pago insuficiente", "Ingresá con cuánto paga el cliente.");
+  }
+
+  const { total, vuelto } = await registrarVenta({
     turnoId: sesion.turno.id,
-    usuario: sesion.usuario,
     carrito: [...carrito].map(([productoId, cantidad]) => ({ productoId, cantidad })),
     metodoPago: selectMetodo.value,
+    montoRecibido,
   });
 
-  notificarExito(`Venta cobrada: ${formatearMoneda(total)}`);
+  notificarExito(
+    vuelto != null
+      ? `Cobrado ${formatearMoneda(total)} · Vuelto ${formatearMoneda(vuelto)}`
+      : `Venta cobrada: ${formatearMoneda(total)}`,
+  );
   carrito.clear();
+  inputPagaCon.value = "";
   selectMetodo.value = "Efectivo";
   renderCarrito();
   buscador.focus();
@@ -219,12 +270,7 @@ async function cargarSube() {
   const monto = parsearMonto(input.value);
   if (!(monto > 0)) return avisar("Monto inválido", "Ingresá un monto mayor a 0.");
 
-  await registrarRecargaSube({
-    turnoId: sesion.turno.id,
-    usuario: sesion.usuario,
-    monto,
-    metodoPago: selectMetodo.value,
-  });
+  await registrarRecargaSube({ turnoId: sesion.turno.id, monto, metodoPago: selectMetodo.value });
 
   notificarExito(`Recarga SUBE registrada: ${formatearMoneda(monto)}`);
   input.value = "";

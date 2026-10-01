@@ -7,6 +7,11 @@ import {
   connectFirestoreEmulator,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { getAuth, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import {
+  getFunctions,
+  httpsCallable,
+  connectFunctionsEmulator,
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 
 export {
   collection,
@@ -21,7 +26,6 @@ export {
   orderBy,
   limit,
   onSnapshot,
-  runTransaction,
   writeBatch,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
@@ -48,6 +52,13 @@ export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 export const auth = getAuth(app);
+// Misma región que Firestore y que functions/index.js.
+const functions = getFunctions(app, "southamerica-east1");
+
+/** Llama a una Cloud Function y devuelve directamente su resultado. */
+export function llamarFuncion(nombre, datos) {
+  return httpsCallable(functions, nombre)(datos).then((r) => r.data);
+}
 
 // Desarrollo local contra los emuladores: http://localhost:3000/?emulador
 const usarEmulador =
@@ -55,5 +66,6 @@ const usarEmulador =
 if (usarEmulador) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
   console.info("Usando emuladores de Firebase");
 }

@@ -213,3 +213,25 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
   .stats-grid, .stats-grid-3 { grid-template-columns: repeat(2, 1fr); }
   .form-inline { grid-template-columns: 1fr; }
 }
+
+/* === COBRO: PAGO Y VUELTO === */
+.pago-efectivo .input-lg { text-align: right; }
+.vuelto-fila { display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px; padding: 10px 14px; border-radius: 8px; background: #ecfdf5; color: #065f46; font-size: 1.1rem; }
+.vuelto-fila strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.vuelto-fila.falta { background: #fef2f2; color: #991b1b; }
+
+/* === CAJA DEL TURNO === */
+.desglose { text-align: left; margin: 0 auto; max-width: 360px; }
+.desglose > div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+.desglose dt { color: var(--text-muted); }
+.desglose dd { font-variant-numeric: tabular-nums; font-weight: 600; }
+.desglose-total { border-bottom: none !important; border-top: 2px solid var(--dark); margin-top: 4px; font-size: 1.15rem; }
+.desglose-total dt { color: var(--dark); font-weight: 700; }
+.diferencia-preview { min-height: 1.3em; margin-top: 8px; font-weight: 600; }
+.swal-form .desglose { max-width: none; margin: 8px 0 12px; }
+
+/* === ADMIN === */
+.btn-excel { background: #15803d; color: white; }
+.btn-excel:hover { background: #166534; }
+.badge-abierto { background: #dcfce7; color: #166534; }
+.d-block { display: block; }

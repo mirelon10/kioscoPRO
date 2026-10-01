@@ -11,6 +11,7 @@ import {
   onSnapshot,
   writeBatch,
   serverTimestamp,
+  llamarFuncion,
 } from "../firebase.js";
 import { ErrorNegocio } from "../core/errores.js";
 
@@ -92,13 +93,43 @@ export async function abrirTurno(usuario, cajaInicial) {
   return turnoRef.id;
 }
 
-export async function cerrarTurno(uid, turnoId, cajaFinal) {
-  const batch = writeBatch(db);
-  batch.update(doc(turnosCol, turnoId), {
-    estado: "cerrado",
-    cajaFinal,
-    fechaCierre: serverTimestamp(),
-  });
-  batch.delete(candado(uid));
-  await batch.commit();
+/**
+ * Cierra un turno en el servidor (función cerrarTurno), que recalcula el efectivo esperado.
+ * El admin puede cerrar el turno de otro empleado.
+ * @returns {Promise<{ esperado: number, cajaContada: number, diferencia: number }>}
+ */
+export function cerrarTurno(turnoId, cajaContada) {
+  return llamarFuncion("cerrarTurno", { turnoId, cajaContada });
+}
+
+// ---------- Ventas y egresos de un turno (para calcular la caja) ----------
+
+// Se filtra también por empleadoId: las reglas solo dejan al empleado leer lo suyo.
+const delTurno = (coleccion, turno) =>
+  query(collection(db, coleccion), where("turnoId", "==", turno.id), where("empleadoId", "==", turno.empleadoId));
+
+const datosDe = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
+
+/**
+ * Escucha en tiempo real las ventas y egresos del turno abierto: el monto a declarar
+ * al cerrar y la lista de egresos del empleado se actualizan solos.
+ * @returns {() => void} función para dejar de escuchar
+ */
+export function escucharMovimientosTurno(turno, alCambiar, alFallar) {
+  const movimientos = { ventas: null, egresos: null };
+  const avisar = () => {
+    if (movimientos.ventas && movimientos.egresos) alCambiar({ ...movimientos });
+  };
+  const dejarVentas = onSnapshot(delTurno("ventas", turno), (s) => { movimientos.ventas = datosDe(s); avisar(); }, alFallar);
+  const dejarEgresos = onSnapshot(delTurno("egresos", turno), (s) => { movimientos.egresos = datosDe(s); avisar(); }, alFallar);
+  return () => {
+    dejarVentas();
+    dejarEgresos();
+  };
+}
+
+/** Lectura única, para que el admin vea la caja de un turno ajeno antes de cerrarlo. */
+export async function obtenerMovimientosTurno(turno) {
+  const [ventas, egresos] = await Promise.all([getDocs(delTurno("ventas", turno)), getDocs(delTurno("egresos", turno))]);
+  return { ventas: datosDe(ventas), egresos: datosDe(egresos) };
 }
