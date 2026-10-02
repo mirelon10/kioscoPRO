@@ -1,4 +1,5 @@
 import { ErrorNegocio, mensajeDeError } from "./core/errores.js";
+import { h } from "./lib/dom.js";
 
 // SweetAlert2 se carga como <script> clásico en index.html (con integridad SRI).
 const Swal = window.Swal;
@@ -23,11 +24,16 @@ export function mostrarError(error, porDefecto) {
   return Swal.fire({ icon: "error", titleText: "Error", text: mensajeDeError(error, porDefecto) });
 }
 
-export async function confirmar({ titulo, texto, boton = "Confirmar", peligro = false }) {
+/** Muestra un elemento del DOM armado con h() (nunca un string HTML). */
+export const mostrarDetalle = ({ titulo, contenido, icono = "success" }) =>
+  Swal.fire({ icon: icono, titleText: titulo, html: contenido, confirmButtonText: "Listo" });
+
+/** `contenido` (opcional) es un elemento del DOM que se muestra debajo del texto. */
+export async function confirmar({ titulo, texto, contenido = null, boton = "Confirmar", peligro = false }) {
   const { isConfirmed } = await Swal.fire({
     icon: peligro ? "warning" : "question",
     titleText: titulo,
-    text: texto,
+    ...(contenido ? { html: h("div", {}, h("p", { class: "mb-3" }, texto), contenido) } : { text: texto }),
     showCancelButton: true,
     confirmButtonText: boton,
     cancelButtonText: "Cancelar",

@@ -5,7 +5,7 @@ import { redondear, parsearMonto, calcularPrecioVenta } from "../../public/js/li
 import { fechaLocalISO, inicioDelDia, finDelDia, aDate } from "../../public/js/lib/fechas.js";
 import { armarVenta, normalizarVenta } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
-import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias } from "../../public/js/core/productos.js";
+import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias, calcularAjusteStock } from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
 import { calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
@@ -124,6 +124,25 @@ describe("productos", () => {
   });
 });
 
+describe("calcularAjusteStock", () => {
+  test("ingreso suma, baja resta y conteo fija el número contado", () => {
+    assert.deepEqual(calcularAjusteStock(10, "ingreso", "24"), { cambio: 24, stock: 34 });
+    assert.deepEqual(calcularAjusteStock(10, "baja", 3), { cambio: -3, stock: 7 });
+    assert.deepEqual(calcularAjusteStock(10, "conteo", "8"), { cambio: -2, stock: 8 });
+    assert.deepEqual(calcularAjusteStock(10, "conteo", "0"), { cambio: -10, stock: 0 });
+  });
+
+  test("rechaza cantidades inválidas, stock negativo y ajustes que no cambian nada", () => {
+    assert.match(calcularAjusteStock(10, "ingreso", "").error, /entero/);
+    assert.match(calcularAjusteStock(10, "ingreso", "1.5").error, /entero/);
+    assert.match(calcularAjusteStock(10, "ingreso", "-2").error, /entero/);
+    assert.match(calcularAjusteStock(10, "ingreso", "0").error, /mayor a 0/);
+    assert.match(calcularAjusteStock(3, "baja", "5").error, /hay 3/);
+    assert.match(calcularAjusteStock(10, "conteo", "10").error, /nada que ajustar/);
+    assert.match(calcularAjusteStock(10, "otro", "1").error, /tipo/);
+  });
+});
+
 describe("calcularResumen", () => {
   const desde = new Date(2026, 9, 1, 0, 0);
   const hasta = new Date(2026, 9, 1, 23, 59, 59, 999);
@@ -156,6 +175,10 @@ describe("calcularResumen", () => {
     // esperado = 1000 inicial + 2200 efectivo - 300 egresos = 2900
     assert.equal(t1.esperado, 2900);
     assert.equal(t1.diferencia, 0);
+    assert.equal(t1.totalVentas, 2200);
+    assert.equal(t1.sube, 700);
+    assert.equal(t2.tarjeta, 2000);
+    assert.equal(t2.mercadoPago, 0);
     assert.equal(t2.diferencia, null);
     assert.equal(t2.cajaFinal, null);
   });
@@ -191,7 +214,7 @@ describe("mensajeDeError", () => {
 });
 
 describe("calcularCajaTurno", () => {
-  test("caja inicial + efectivo (incluida SUBE vieja) − egresos; MP y tarjeta van aparte", () => {
+  test("desglosa por método de pago y calcula caja inicial + efectivo (incluida SUBE vieja) − egresos", () => {
     const caja = calcularCajaTurno({
       cajaInicial: 1000,
       ventas: [
@@ -202,11 +225,23 @@ describe("calcularCajaTurno", () => {
       ],
       egresos: [{ monto: 300 }, { monto: "50" }],
     });
-    assert.deepEqual(caja, { cajaInicial: 1000, efectivo: 1700.3, otrosMedios: 1499, egresos: 350, esperado: 2350.3, cantidadVentas: 4 });
+    assert.deepEqual(caja, {
+      cajaInicial: 1000,
+      porMetodo: { Efectivo: 1700.3, "Mercado Pago": 500, Tarjeta: 999 },
+      sube: 700.2,
+      totalVentas: 3199.3,
+      efectivo: 1700.3,
+      egresos: 350,
+      esperado: 2350.3,
+      cantidadVentas: 4,
+    });
   });
 
-  test("turno sin movimientos: lo esperado es la caja inicial", () => {
-    assert.equal(calcularCajaTurno({ cajaInicial: 500, ventas: [], egresos: [] }).esperado, 500);
+  test("turno sin movimientos: lo esperado es la caja inicial y todo lo vendido en cero", () => {
+    const caja = calcularCajaTurno({ cajaInicial: 500, ventas: [], egresos: [] });
+    assert.equal(caja.esperado, 500);
+    assert.equal(caja.totalVentas, 0);
+    assert.deepEqual(caja.porMetodo, { Efectivo: 0, "Mercado Pago": 0, Tarjeta: 0 });
   });
 });
 
@@ -232,8 +267,8 @@ describe("armarExcelResumen", () => {
     totalEgresos: 301,
     neto: 2799,
     turnos: [
-      { empleado: "ana@k.com", abierto: false, apertura: desde, cierre: hasta, cerradoPor: "admin@k.com", cajaInicial: 1000, efectivo: 2600, egresos: 301, esperado: 3299, cajaFinal: 3290, diferencia: -9 },
-      { empleado: "beto@k.com", abierto: true, apertura: desde, cierre: null, cerradoPor: null, cajaInicial: 0, efectivo: 0, egresos: 0, esperado: 0, cajaFinal: null, diferencia: null },
+      { empleado: "ana@k.com", abierto: false, apertura: desde, cierre: hasta, cerradoPor: "admin@k.com", cajaInicial: 1000, efectivo: 2600, mercadoPago: 500, tarjeta: 0, totalVentas: 3100, sube: 500, egresos: 301, esperado: 3299, cajaFinal: 3290, diferencia: -9 },
+      { empleado: "beto@k.com", abierto: true, apertura: desde, cierre: null, cerradoPor: null, cajaInicial: 0, efectivo: 0, mercadoPago: 0, tarjeta: 0, totalVentas: 0, sube: 0, egresos: 0, esperado: 0, cajaFinal: null, diferencia: null },
     ],
     egresos: [{ fecha: { toDate: () => desde }, empleadoNombre: "ana@k.com", motivo: "Proveedor", monto: 301 }],
   };
@@ -248,7 +283,7 @@ describe("armarExcelResumen", () => {
     const [res, turnos, egresos] = armarExcelResumen(resumen, { desde, hasta, empleado: "ana@k.com" }).hojas;
     assert.deepEqual(res.filas.find((f) => f[0] === "Neto (ventas − egresos)"), ["Neto (ventas − egresos)", 2799]);
     assert.deepEqual(res.filas[2], ["Empleado", "ana@k.com"]);
-    assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2600, 301, 3299, 3290, -9, "admin@k.com"]);
+    assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2600, 500, 0, 3100, 500, 301, 3299, 3290, -9, "admin@k.com"]);
     assert.deepEqual(turnos.filas[2].slice(2, 4), ["", "Abierto"]);
     assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", 301]);
   });

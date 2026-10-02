@@ -33,11 +33,15 @@ export function armarExcelResumen(resumen, { desde, hasta, empleado = "Todos los
 
   const hojaTurnos = {
     nombre: "Turnos",
-    anchos: [28, 17, 17, 10, 14, 14, 14, 14, 14, 14, 28],
-    columnasMoneda: [4, 5, 6, 7, 8, 9],
+    anchos: [28, 17, 17, 10, 14, 14, 14, 14, 14, 16, 14, 14, 14, 14, 28],
+    columnasMoneda: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     filaDesde: 1,
     filas: [
-      ["Empleado", "Apertura", "Cierre", "Estado", "Caja inicial", "Ventas efectivo", "Egresos", "Esperado", "Contado", "Diferencia", "Cerrado por"],
+      [
+        "Empleado", "Apertura", "Cierre", "Estado", "Caja inicial",
+        "Ventas efectivo", "Ventas Mercado Pago", "Ventas tarjeta", "Total ventas", "Recargas SUBE (incluidas)",
+        "Egresos", "Esperado", "Contado", "Diferencia", "Cerrado por",
+      ],
       ...resumen.turnos.map((t) => [
         t.empleado,
         t.apertura ?? "",
@@ -45,6 +49,10 @@ export function armarExcelResumen(resumen, { desde, hasta, empleado = "Todos los
         t.abierto ? "Abierto" : "Cerrado",
         t.cajaInicial,
         t.efectivo,
+        t.mercadoPago,
+        t.tarjeta,
+        t.totalVentas,
+        t.sube,
         t.egresos,
         t.esperado,
         t.cajaFinal ?? "",

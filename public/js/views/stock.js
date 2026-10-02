@@ -1,8 +1,8 @@
-import { $, h, icono, filaVacia } from "../lib/dom.js";
+import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
 import { calcularPrecioVenta, formatearMoneda } from "../lib/dinero.js";
-import { construirProducto, UMBRAL_STOCK_BAJO } from "../core/productos.js";
-import { crearProducto, eliminarProducto, guardarProducto } from "../data/productos.js";
-import { sesion, alCambiarSesion } from "../estado.js";
+import { calcularAjusteStock, construirProducto, MODOS_AJUSTE_STOCK, UMBRAL_STOCK_BAJO } from "../core/productos.js";
+import { ajustarStock, crearProducto, eliminarProducto, guardarProducto } from "../data/productos.js";
+import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
 import { avisar, confirmar, conBoton, formularioModal, mostrarError, notificarExito } from "../ui.js";
 
 const form = $("form-nuevo-producto");
@@ -28,17 +28,27 @@ export function iniciarStock() {
     if (!boton) return;
     const producto = sesion.productos.find((p) => p.id === boton.dataset.id);
     if (!producto) return;
+    if (boton.dataset.accion === "ajustar") conBoton(boton, () => ajustar(producto));
     if (boton.dataset.accion === "editar") conBoton(boton, () => editar(producto));
     if (boton.dataset.accion === "borrar") conBoton(boton, () => borrar(producto));
   });
 
   // El catálogo llega en tiempo real: la tabla se actualiza sola tras cada venta o edición.
   alCambiarSesion((_, cambios) => {
-    if ("productos" in cambios && !$("admin-stock-view").classList.contains("hidden")) renderStock();
+    if ("productos" in cambios && !$("sec-stock").classList.contains("hidden")) renderStock();
   });
 }
 
+/**
+ * El admin ve todo (alta, edición, borrado y costo). El empleado ve el catálogo sin el costo
+ * y solo puede ajustar el stock (las reglas de Firestore también se lo limitan a ese campo).
+ */
 export function renderStock() {
+  const admin = esAdmin();
+  mostrar($("card-nuevo-producto"), admin);
+  mostrar($("th-costo"), admin);
+  const columnas = admin ? 7 : 6;
+
   const termino = filtro.value.trim().toLowerCase();
   const productos = termino
     ? sesion.productos.filter((p) =>
@@ -47,7 +57,7 @@ export function renderStock() {
     : sesion.productos;
 
   if (productos.length === 0) {
-    return filaVacia(tbody, 7, termino ? "Ningún producto coincide con el filtro." : "Todavía no hay productos cargados.");
+    return filaVacia(tbody, columnas, termino ? "Ningún producto coincide con el filtro." : "Todavía no hay productos cargados.");
   }
 
   tbody.replaceChildren(
@@ -58,7 +68,7 @@ export function renderStock() {
         h("td", {}, p.codigo || "-"),
         h("td", {}, h("span", { class: "badge" }, p.categoria || "Sin categoría")),
         h("td", {}, p.nombre),
-        h("td", { class: "num text-muted" }, formatearMoneda(p.precioCompra)),
+        admin ? h("td", { class: "num text-muted" }, formatearMoneda(p.precioCompra)) : null,
         h("td", { class: "num" }, h("strong", {}, formatearMoneda(p.precio))),
         h("td", { class: `num ${p.stock <= UMBRAL_STOCK_BAJO ? "stock-low" : ""}` }, p.stock),
         h(
@@ -66,14 +76,24 @@ export function renderStock() {
           { class: "acciones" },
           h(
             "button",
-            { type: "button", class: "btn btn-warning btn-sm", "aria-label": `Editar ${p.nombre}`, dataset: { accion: "editar", id: p.id } },
-            icono("pen"),
+            { type: "button", class: "btn btn-primary btn-sm", title: "Ajustar stock", "aria-label": `Ajustar stock de ${p.nombre}`, dataset: { accion: "ajustar", id: p.id } },
+            icono("boxes-stacked"),
+            " Stock",
           ),
-          h(
-            "button",
-            { type: "button", class: "btn btn-danger btn-sm", "aria-label": `Borrar ${p.nombre}`, dataset: { accion: "borrar", id: p.id } },
-            icono("trash"),
-          ),
+          admin
+            ? h(
+                "button",
+                { type: "button", class: "btn btn-warning btn-sm", title: "Editar", "aria-label": `Editar ${p.nombre}`, dataset: { accion: "editar", id: p.id } },
+                icono("pen"),
+              )
+            : null,
+          admin
+            ? h(
+                "button",
+                { type: "button", class: "btn btn-danger btn-sm", title: "Borrar", "aria-label": `Borrar ${p.nombre}`, dataset: { accion: "borrar", id: p.id } },
+                icono("trash"),
+              )
+            : null,
         ),
       ),
     ),
@@ -157,6 +177,61 @@ async function editar(producto) {
 
   await guardarProducto(producto.id, datos);
   notificarExito("Cambios guardados");
+}
+
+// ---------- Ajuste de stock (admin y empleado) ----------
+
+const FORMULARIO_AJUSTE = `
+  <div class="swal-form">
+    <p id="ajuste-producto" class="text-muted"></p>
+    <label>Tipo de ajuste<select id="ajuste-modo" class="swal2-select"></select></label>
+    <label><span id="ajuste-etiqueta">Cantidad</span><input id="ajuste-cantidad" type="number" min="0" step="1" class="swal2-input" inputmode="numeric"></label>
+    <p id="ajuste-resultado" class="ajuste-resultado" aria-live="polite"></p>
+  </div>`;
+
+async function ajustar(producto) {
+  const campo = (popup, id) => popup.querySelector(`#ajuste-${id}`);
+  const leerAjuste = (popup) =>
+    calcularAjusteStock(producto.stock, campo(popup, "modo").value, campo(popup, "cantidad").value);
+
+  const ajuste = await formularioModal({
+    titulo: "Ajustar stock",
+    boton: "Guardar ajuste",
+    contenido: FORMULARIO_AJUSTE,
+    alAbrir: (popup) => {
+      campo(popup, "producto").textContent = `${producto.nombre} · stock actual: ${producto.stock}`;
+      campo(popup, "modo").replaceChildren(
+        ...Object.entries(MODOS_AJUSTE_STOCK).map(([valor, texto]) => h("option", { value: valor }, texto)),
+      );
+      const actualizar = () => {
+        const modo = campo(popup, "modo").value;
+        campo(popup, "etiqueta").textContent = modo === "conteo" ? "Unidades contadas" : "Cantidad";
+        const { stock, error } = leerAjuste(popup);
+        campo(popup, "resultado").textContent =
+          campo(popup, "cantidad").value === "" ? "" : error ?? `Stock resultante: ${stock}`;
+      };
+      campo(popup, "modo").addEventListener("change", actualizar);
+      campo(popup, "cantidad").addEventListener("input", actualizar);
+      // Swal enfoca el botón al abrir; se pasa al campo de cantidad para escribir directo.
+      setTimeout(() => campo(popup, "cantidad").focus());
+    },
+    leer: (popup) => {
+      const resultado = leerAjuste(popup);
+      return resultado.error ?? { ...resultado, modo: campo(popup, "modo").value };
+    },
+  });
+  if (!ajuste) return;
+
+  try {
+    await ajustarStock(producto.id, ajuste);
+  } catch (error) {
+    // Si se vendió mientras el modal estaba abierto, una baja puede dejar el stock negativo.
+    if (error.code === "permission-denied") {
+      return avisar("No se pudo ajustar", "El stock cambió mientras ajustabas (quizás hubo una venta). Revisalo y volvé a intentar.");
+    }
+    throw error;
+  }
+  notificarExito(`${producto.nombre}: ${ajuste.cambio > 0 ? "+" : ""}${ajuste.cambio} unidades`);
 }
 
 async function borrar(producto) {

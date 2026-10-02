@@ -56,6 +56,7 @@
       <button type="button" class="nav-btn active" data-target="sec-pos"><i class="fa-solid fa-cart-shopping" aria-hidden="true"></i> Ventas (POS)</button>
       <button type="button" class="nav-btn" data-target="sec-turnos"><i class="fa-solid fa-vault" aria-hidden="true"></i> Caja y turnos</button>
       <button type="button" class="nav-btn" data-target="sec-egresos"><i class="fa-solid fa-money-bill-transfer" aria-hidden="true"></i> Egresos</button>
+      <button type="button" class="nav-btn" data-target="sec-stock"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Inventario</button>
       <button type="button" class="nav-btn hidden" id="nav-admin" data-target="sec-admin"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> Administración</button>
     </nav>
     <div class="sidebar-footer">
@@ -150,13 +151,8 @@
           <p id="txt-fecha-apertura" class="text-muted"></p>
           <p id="aviso-turno-largo" class="form-error hidden">Tu turno lleva más de 24 h abierto. Cerralo y abrí uno nuevo.</p>
 
-          <dl class="desglose mt-3" aria-label="Caja calculada del turno">
-            <div><dt>Caja inicial</dt><dd id="caja-inicial">—</dd></div>
-            <div><dt>+ Ventas en efectivo</dt><dd id="caja-efectivo">—</dd></div>
-            <div><dt>− Egresos</dt><dd id="caja-egresos">—</dd></div>
-            <div class="desglose-total"><dt>= Efectivo esperado</dt><dd id="caja-esperado">—</dd></div>
-          </dl>
-          <p id="caja-otros" class="text-muted"></p>
+          <!-- Ventas por método de pago y efectivo esperado (lo arma views/desglose.js) -->
+          <div id="cierre-desglose" class="mt-3" aria-live="polite"><p class="text-muted">Calculando…</p></div>
 
           <label for="cajaFinal" class="field-label mt-3">Efectivo contado en caja <small>(precargado con el esperado; corregilo si contaste otra cosa)</small></label>
           <input type="number" id="cajaFinal" placeholder="$ 0,00" class="input-modern input-lg" min="0" step="0.01" inputmode="decimal" required>
@@ -210,15 +206,40 @@
       </div>
     </section>
 
-    <!-- ADMINISTRACIÓN -->
-    <section id="sec-admin" class="view-section hidden" aria-labelledby="titulo-admin">
-      <div class="section-header">
-        <h2 id="titulo-admin">Panel de administración</h2>
-        <div class="admin-controls" role="tablist">
-          <button type="button" id="btn-ver-ventas" class="btn btn-primary" role="tab" aria-selected="true">Resumen de caja</button>
-          <button type="button" id="btn-ver-stock" class="btn btn-secondary" role="tab" aria-selected="false">Inventario y stock</button>
+    <!-- INVENTARIO: el admin da de alta y edita productos; el empleado ajusta el stock -->
+    <section id="sec-stock" class="view-section hidden" aria-labelledby="titulo-stock">
+      <div class="section-header"><h2 id="titulo-stock">Inventario y stock</h2></div>
+      <div id="card-nuevo-producto" class="card mb-4 hidden">
+        <h4 class="mb-3"><i class="fa-solid fa-plus-circle" aria-hidden="true"></i> Agregar producto</h4>
+        <form id="form-nuevo-producto" class="form-grid-producto" novalidate>
+          <div><label for="prod-codigo" class="field-label">Código de barras</label><input type="text" id="prod-codigo" class="input-modern" maxlength="64"></div>
+          <div><label for="prod-categoria" class="field-label">Categoría</label><input type="text" id="prod-categoria" class="input-modern" maxlength="60"></div>
+          <div class="span-2"><label for="prod-nombre" class="field-label">Nombre del producto</label><input type="text" id="prod-nombre" class="input-modern" maxlength="120" required></div>
+          <div><label for="prod-compra" class="field-label">Precio de compra ($)</label><input type="number" id="prod-compra" min="0" step="0.01" class="input-modern" required></div>
+          <div><label for="prod-margen" class="field-label">Margen (%)</label><input type="number" id="prod-margen" min="0" step="0.01" class="input-modern" required></div>
+          <div><label for="prod-precio" class="field-label">Precio de venta</label><input type="text" id="prod-precio" class="input-modern input-readonly" readonly tabindex="-1"></div>
+          <div><label for="prod-stock" class="field-label">Stock inicial</label><input type="number" id="prod-stock" min="0" step="1" class="input-modern" required></div>
+          <div class="form-acciones"><button type="submit" class="btn btn-success btn-block">Guardar</button></div>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h4>Catálogo actual</h4>
+          <label for="filtro-stock" class="sr-only">Filtrar catálogo</label>
+          <input type="search" id="filtro-stock" class="input-modern input-filtro" placeholder="Filtrar por nombre, código o categoría">
+        </div>
+        <div class="tabla-scroll">
+          <table class="table-modern">
+            <thead><tr><th>Código</th><th>Categoría</th><th>Producto</th><th class="num" id="th-costo">Costo</th><th class="num">Venta</th><th class="num">Stock</th><th>Acciones</th></tr></thead>
+            <tbody id="tabla-stock-admin"></tbody>
+          </table>
         </div>
       </div>
+    </section>
+
+    <!-- ADMINISTRACIÓN -->
+    <section id="sec-admin" class="view-section hidden" aria-labelledby="titulo-admin">
+      <div class="section-header"><h2 id="titulo-admin">Panel de administración</h2></div>
 
       <div id="alerta-stock-admin" class="alert-banner hidden" role="alert">
         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
@@ -229,7 +250,7 @@
       </div>
 
       <!-- RESUMEN DE CAJA -->
-      <div id="admin-resumen-view" role="tabpanel">
+      <div id="admin-resumen-view">
         <form id="form-filtro-admin" class="admin-filters card mb-4">
           <label for="admin-desde" class="sr-only">Desde</label>
           <input type="date" id="admin-desde" class="input-modern">
@@ -261,39 +282,10 @@
             <table class="table-modern">
               <thead><tr>
                 <th>Empleado</th><th>Apertura</th><th>Cierre</th><th class="num">Inicial</th><th class="num">Efectivo</th>
+                <th class="num">Mercado Pago</th><th class="num">Tarjeta</th><th class="num" title="Ya incluidas en efectivo, Mercado Pago o tarjeta">SUBE</th><th class="num">Total ventas</th>
                 <th class="num">Egresos</th><th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th><th></th>
               </tr></thead>
               <tbody id="tabla-turnos"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- INVENTARIO -->
-      <div id="admin-stock-view" class="hidden" role="tabpanel">
-        <div class="card mb-4">
-          <h4 class="mb-3"><i class="fa-solid fa-plus-circle" aria-hidden="true"></i> Agregar producto</h4>
-          <form id="form-nuevo-producto" class="form-grid-producto" novalidate>
-            <div><label for="prod-codigo" class="field-label">Código de barras</label><input type="text" id="prod-codigo" class="input-modern" maxlength="64"></div>
-            <div><label for="prod-categoria" class="field-label">Categoría</label><input type="text" id="prod-categoria" class="input-modern" maxlength="60"></div>
-            <div class="span-2"><label for="prod-nombre" class="field-label">Nombre del producto</label><input type="text" id="prod-nombre" class="input-modern" maxlength="120" required></div>
-            <div><label for="prod-compra" class="field-label">Precio de compra ($)</label><input type="number" id="prod-compra" min="0" step="0.01" class="input-modern" required></div>
-            <div><label for="prod-margen" class="field-label">Margen (%)</label><input type="number" id="prod-margen" min="0" step="0.01" class="input-modern" required></div>
-            <div><label for="prod-precio" class="field-label">Precio de venta</label><input type="text" id="prod-precio" class="input-modern input-readonly" readonly tabindex="-1"></div>
-            <div><label for="prod-stock" class="field-label">Stock inicial</label><input type="number" id="prod-stock" min="0" step="1" class="input-modern" required></div>
-            <div class="form-acciones"><button type="submit" class="btn btn-success btn-block">Guardar</button></div>
-          </form>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h4>Catálogo actual</h4>
-            <label for="filtro-stock" class="sr-only">Filtrar catálogo</label>
-            <input type="search" id="filtro-stock" class="input-modern input-filtro" placeholder="Filtrar por nombre, código o categoría">
-          </div>
-          <div class="tabla-scroll">
-            <table class="table-modern">
-              <thead><tr><th>Código</th><th>Categoría</th><th>Producto</th><th class="num">Costo</th><th class="num">Venta</th><th class="num">Stock</th><th>Acciones</th></tr></thead>
-              <tbody id="tabla-stock-admin"></tbody>
             </table>
           </div>
         </div>
