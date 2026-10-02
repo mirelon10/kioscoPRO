@@ -1,5 +1,5 @@
 import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "./firebase.js";
-import { $, mostrar } from "./lib/dom.js";
+import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
 import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
@@ -26,6 +26,7 @@ iniciarTurno();
 iniciarEgresos();
 iniciarAdmin();
 iniciarStock();
+etiquetarTablasParaCelular();
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => irA(btn.dataset.target));
