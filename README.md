@@ -116,6 +116,11 @@ se registra el efectivo que debería quedar en el cajón (caja inicial + todo lo
 cierre, en *Caja y turnos*). No puede guardar más efectivo del que hay en el cajón. Cada guardado queda
 registrado con su hora, no se puede borrar y se resta del total del turno.
 
+El **saldo de la caja de guardado** (`cajaGuardado/saldo`, en centavos) se acumula entre turnos: suma lo guardado y
+resta lo pagado con ella. Cada cambio va en una transacción junto con el movimiento que lo explica, y las reglas
+verifican que el saldo cambie exactamente en ese monto y nunca quede negativo. El admin puede **ajustar el saldo**
+(conteo de la caja, retiro del dueño) desde *Administración*; el ajuste queda registrado con motivo y autor.
+
 **Inventario:** sección para todos los usuarios. El admin da de alta, edita y borra productos. El empleado ve
 el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja por rotura o
 vencimiento (−) o conteo (fija el número contado). Ingresos y bajas usan `increment()`, así no pisan una venta
@@ -124,7 +129,10 @@ que entre mientras el modal está abierto.
 **Cierre forzado:** si un empleado se va sin cerrar, el admin lo cierra desde *Administración → Turnos del
 período* (botón *Cerrar*). Queda registrado quién lo cerró.
 
-**Egresos:** cada empleado ve los egresos de su turno. La búsqueda por fecha es solo para administradores.
+**Egresos:** cada egreso se clasifica como *costo fijo* o *costo variable* y se paga **con la caja** del turno o
+**con la caja de guardado**. Lo pagado con la caja de guardado descuenta su saldo y no se resta del cierre del
+turno (esa plata no sale del cajón). Cada empleado ve los egresos de su turno; la búsqueda por fecha es solo
+para administradores. Los egresos anteriores a la clasificación se muestran como *Sin clasificar*.
 
 **Exportar a Excel:** desde el resumen de caja, con tres hojas (Resumen, Turnos, Egresos). Los montos y las
 fechas son valores reales de Excel, se pueden sumar y filtrar.
@@ -137,8 +145,10 @@ fechas son valores reales de Excel, se pueden sumar y filtrar.
 | `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
 | `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
-| `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, fecha` | Empleado con turno abierto. **Inmutables.** |
-| `guardados/{id}` | `turnoId, empleadoId, empleadoNombre, monto, fecha` | Caja de guardado. Empleado con turno abierto. **Inmutables.** |
+| `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, tipo ("fijo"\|"variable"), origen ("caja"\|"guardado"), fecha` | Empleado con turno abierto. Con origen `guardado`, junto con el saldo. **Inmutables.** |
+| `guardados/{id}` | `turnoId, empleadoId, empleadoNombre, monto, fecha` | Caja de guardado. Empleado con turno abierto, junto con el saldo. **Inmutables.** |
+| `cajaGuardado/saldo` | `saldoCentavos, movColeccion, movId, actualizado` | Saldo acumulado. Lo mueve cada guardado, egreso pagado con la caja de guardado o ajuste del admin. |
+| `ajustesGuardado/{id}` | `saldoAnteriorCentavos, saldoNuevoCentavos, motivo, adminId, adminNombre, fecha` | Solo admin. **Inmutables.** |
 
 Las fechas siempre las pone el servidor (`serverTimestamp`) y las reglas lo verifican.
 
