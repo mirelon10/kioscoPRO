@@ -250,3 +250,10 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 /* === AJUSTE DE STOCK === */
 .swal-form .swal2-select { margin: 4px 0 0; width: 100%; }
 .ajuste-resultado { min-height: 1.3em; font-weight: 600; color: var(--dark); }
+
+/* === CIERRE EN UN SOLO TOTAL Y CAJA DE GUARDADO === */
+.desglose-separador { border-top: 2px solid var(--border); margin-top: 6px; padding-top: 10px !important; }
+.desglose-resta dd { color: var(--danger); }
+#caja-guardado h3 { color: var(--dark); margin-bottom: 4px; }
+#caja-guardado .table-modern th, #caja-guardado .table-modern td { padding: 10px 15px; }
+#caja-guardado { margin-top: 1.5rem; }

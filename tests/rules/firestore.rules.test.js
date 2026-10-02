@@ -84,6 +84,15 @@ const venta = (uid, extra = {}) => ({
   ...extra,
 });
 
+const guardado = (uid, extra = {}) => ({
+  turnoId: `turno-${uid}`,
+  empleadoId: uid,
+  empleadoNombre: `${uid}@kiosco.test`,
+  monto: 5000,
+  fecha: serverTimestamp(),
+  ...extra,
+});
+
 const egreso = (uid, extra = {}) => ({
   turnoId: `turno-${uid}`,
   empleadoId: uid,
@@ -376,5 +385,40 @@ describe("egresos", () => {
     await assertSucceeds(getDocs(query(egresos, where("turnoId", "==", `turno-${ANA}`), where("empleadoId", "==", ANA))));
     await assertFails(getDocs(egresos));
     await assertSucceeds(getDocs(collection(comoAdmin(), "egresos")));
+  });
+});
+
+describe("caja de guardado", () => {
+  test("el empleado guarda efectivo durante su turno abierto", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await assertSucceeds(addDoc(collection(fs, "guardados"), guardado(ANA)));
+  });
+
+  test("rechaza guardados inválidos, ajenos, sin turno o con el turno cerrado", async () => {
+    await assertFails(addDoc(collection(comoAna(), "guardados"), guardado(ANA)));
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const guardados = collection(fs, "guardados");
+    await assertFails(addDoc(guardados, guardado(ANA, { monto: 0 })));
+    await assertFails(addDoc(guardados, guardado(ANA, { monto: "mucho" })));
+    await assertFails(addDoc(guardados, guardado(ANA, { empleadoId: BETO })));
+    await assertFails(addDoc(guardados, guardado(ANA, { nota: "extra" })));
+    await assertFails(addDoc(guardados, guardado(ANA, { fecha: new Date(2020, 0, 1) })));
+    await cerrarTurno(fs, ANA, ANA);
+    await assertFails(addDoc(guardados, guardado(ANA)));
+  });
+
+  test("los guardados son inmutables y cada empleado ve solo los suyos", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const ref = await addDoc(collection(fs, "guardados"), guardado(ANA));
+    await assertFails(updateDoc(ref, { monto: 1 }));
+    await assertFails(deleteDoc(ref));
+    const guardados = collection(fs, "guardados");
+    await assertSucceeds(getDocs(query(guardados, where("turnoId", "==", `turno-${ANA}`), where("empleadoId", "==", ANA))));
+    await assertFails(getDocs(guardados));
+    await assertFails(getDocs(query(collection(comoBeto(), "guardados"), where("empleadoId", "==", ANA))));
+    await assertSucceeds(getDocs(collection(comoAdmin(), "guardados")));
   });
 });

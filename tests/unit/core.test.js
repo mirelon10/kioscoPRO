@@ -159,28 +159,31 @@ describe("calcularResumen", () => {
     { turnoId: "t2", empleadoId: "e2", tipo: "productos", metodoPago: "Tarjeta", total: 2000, timestamp: ts(15) },
   ];
   const egresos = [{ turnoId: "t1", empleadoId: "e1", monto: 300, motivo: "Proveedor", fecha: ts(12) }];
+  const guardados = [{ turnoId: "t1", empleadoId: "e1", monto: 400, fecha: ts(13) }];
 
-  test("totaliza por método e incluye la SUBE en el efectivo sin contarla dos veces", () => {
-    const r = calcularResumen({ turnos, ventas, egresos, desde, hasta });
-    assert.equal(r.porMetodo["Efectivo"], 2200);
+  test("totaliza por método sin la SUBE, que va aparte y suma al total sin contarse dos veces", () => {
+    const r = calcularResumen({ turnos, ventas, egresos, guardados, desde, hasta });
+    assert.equal(r.porMetodo["Efectivo"], 1500);
     assert.equal(r.porMetodo["Tarjeta"], 2000);
     assert.equal(r.sube, 700);
     assert.equal(r.totalVentas, 4200);
     assert.equal(r.totalEgresos, 300);
+    assert.equal(r.totalGuardado, 400);
     assert.equal(r.neto, 3900);
   });
 
-  test("calcula la diferencia de caja solo en turnos cerrados", () => {
-    const [t1, t2] = calcularResumen({ turnos, ventas, egresos, desde, hasta }).turnos;
-    // esperado = 1000 inicial + 2200 efectivo - 300 egresos = 2900
-    assert.equal(t1.esperado, 2900);
-    assert.equal(t1.diferencia, 0);
-    assert.equal(t1.totalVentas, 2200);
+  test("cada turno muestra su cierre: ventas + SUBE − caja inicial − egresos − guardado", () => {
+    const [t1, t2] = calcularResumen({ turnos, ventas, egresos, guardados, desde, hasta }).turnos;
+    // t1: (1500 + 700 SUBE) − 1000 inicial − 300 egresos − 400 guardado = 500
+    assert.equal(t1.efectivo, 1500);
     assert.equal(t1.sube, 700);
+    assert.equal(t1.totalVentas, 2200);
+    assert.equal(t1.guardado, 400);
+    assert.equal(t1.total, 500);
+    // t2: 2000 tarjeta − 500 inicial = 1500
     assert.equal(t2.tarjeta, 2000);
     assert.equal(t2.mercadoPago, 0);
-    assert.equal(t2.diferencia, null);
-    assert.equal(t2.cajaFinal, null);
+    assert.equal(t2.total, 1500);
   });
 
   test("filtra por empleado", () => {
@@ -193,8 +196,8 @@ describe("calcularResumen", () => {
   test("las ventas fuera del rango no suman a los totales pero sí a la caja de su turno", () => {
     const tarde = { turnoId: "t1", empleadoId: "e1", tipo: "productos", metodoPago: "Efectivo", total: 50, timestamp: { toDate: () => new Date(2026, 9, 2, 0, 30) } };
     const r = calcularResumen({ turnos, ventas: [...ventas, tarde], egresos, desde, hasta });
-    assert.equal(r.porMetodo["Efectivo"], 2200);
-    assert.equal(r.turnos[0].efectivo, 2250);
+    assert.equal(r.porMetodo["Efectivo"], 1500);
+    assert.equal(r.turnos[0].efectivo, 1550);
   });
 
   test("lista empleados únicos ordenados", () => {
@@ -214,7 +217,7 @@ describe("mensajeDeError", () => {
 });
 
 describe("calcularCajaTurno", () => {
-  test("desglosa por método de pago y calcula caja inicial + efectivo (incluida SUBE vieja) − egresos", () => {
+  test("ventas por método + SUBE − caja inicial − egresos − guardado = total", () => {
     const caja = calcularCajaTurno({
       cajaInicial: 1000,
       ventas: [
@@ -224,22 +227,26 @@ describe("calcularCajaTurno", () => {
         { tipo: "sube", metodoPago: "Mercado Pago", total: 500 },
       ],
       egresos: [{ monto: 300 }, { monto: "50" }],
+      guardados: [{ monto: 1000 }],
     });
     assert.deepEqual(caja, {
-      cajaInicial: 1000,
-      porMetodo: { Efectivo: 1700.3, "Mercado Pago": 500, Tarjeta: 999 },
+      porMetodo: { Efectivo: 1500.1, "Mercado Pago": 0, Tarjeta: 999 },
       sube: 700.2,
       totalVentas: 3199.3,
-      efectivo: 1700.3,
+      cajaInicial: 1000,
       egresos: 350,
-      esperado: 2350.3,
+      guardado: 1000,
+      total: 849.3, // 3199,3 − 1000 − 350 − 1000
+      efectivoEnCaja: 1350.3, // 1000 + 1500,1 + 200,2 (SUBE en efectivo) − 350 − 1000
       cantidadVentas: 4,
     });
   });
 
-  test("turno sin movimientos: lo esperado es la caja inicial y todo lo vendido en cero", () => {
+  test("turno sin movimientos: el total es menos la caja inicial y en el cajón queda la inicial", () => {
     const caja = calcularCajaTurno({ cajaInicial: 500, ventas: [], egresos: [] });
-    assert.equal(caja.esperado, 500);
+    assert.equal(caja.total, -500);
+    assert.equal(caja.efectivoEnCaja, 500);
+    assert.equal(caja.guardado, 0);
     assert.equal(caja.totalVentas, 0);
     assert.deepEqual(caja.porMetodo, { Efectivo: 0, "Mercado Pago": 0, Tarjeta: 0 });
   });
@@ -261,14 +268,15 @@ describe("armarExcelResumen", () => {
   const desde = new Date(2026, 9, 1);
   const hasta = new Date(2026, 9, 2, 23, 59);
   const resumen = {
-    porMetodo: { Efectivo: 2600, "Mercado Pago": 500, Tarjeta: 0 },
+    porMetodo: { Efectivo: 2100, "Mercado Pago": 500, Tarjeta: 0 },
     sube: 500,
     totalVentas: 3100,
     totalEgresos: 301,
+    totalGuardado: 200,
     neto: 2799,
     turnos: [
-      { empleado: "ana@k.com", abierto: false, apertura: desde, cierre: hasta, cerradoPor: "admin@k.com", cajaInicial: 1000, efectivo: 2600, mercadoPago: 500, tarjeta: 0, totalVentas: 3100, sube: 500, egresos: 301, esperado: 3299, cajaFinal: 3290, diferencia: -9 },
-      { empleado: "beto@k.com", abierto: true, apertura: desde, cierre: null, cerradoPor: null, cajaInicial: 0, efectivo: 0, mercadoPago: 0, tarjeta: 0, totalVentas: 0, sube: 0, egresos: 0, esperado: 0, cajaFinal: null, diferencia: null },
+      { empleado: "ana@k.com", abierto: false, apertura: desde, cierre: hasta, cerradoPor: "admin@k.com", cajaInicial: 1000, efectivo: 2100, mercadoPago: 500, tarjeta: 0, sube: 500, totalVentas: 3100, egresos: 301, guardado: 200, total: 1599 },
+      { empleado: "beto@k.com", abierto: true, apertura: desde, cierre: null, cerradoPor: null, cajaInicial: 0, efectivo: 0, mercadoPago: 0, tarjeta: 0, sube: 0, totalVentas: 0, egresos: 0, guardado: 0, total: 0 },
     ],
     egresos: [{ fecha: { toDate: () => desde }, empleadoNombre: "ana@k.com", motivo: "Proveedor", monto: 301 }],
   };
@@ -283,7 +291,7 @@ describe("armarExcelResumen", () => {
     const [res, turnos, egresos] = armarExcelResumen(resumen, { desde, hasta, empleado: "ana@k.com" }).hojas;
     assert.deepEqual(res.filas.find((f) => f[0] === "Neto (ventas − egresos)"), ["Neto (ventas − egresos)", 2799]);
     assert.deepEqual(res.filas[2], ["Empleado", "ana@k.com"]);
-    assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2600, 500, 0, 3100, 500, 301, 3299, 3290, -9, "admin@k.com"]);
+    assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2100, 500, 0, 500, 3100, 301, 200, 1599, "admin@k.com"]);
     assert.deepEqual(turnos.filas[2].slice(2, 4), ["", "Abierto"]);
     assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", 301]);
   });

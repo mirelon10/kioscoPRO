@@ -9,11 +9,11 @@ async function entreFechas(coleccion, campo, desde, hasta) {
 }
 
 /**
- * Trae turnos, ventas y egresos de un período consultando solo ese rango
+ * Trae turnos, ventas, egresos y guardados de un período consultando solo ese rango
  * (antes se descargaban las colecciones completas y se filtraba en el navegador).
  *
- * Ventas y egresos se piden hasta el cierre del último turno del período, para que
- * la diferencia de caja de un turno que pasó la medianoche salga completa.
+ * Los movimientos se piden hasta el cierre del último turno del período, para que
+ * el cierre de un turno que pasó la medianoche salga completo.
  */
 export async function obtenerMovimientos(desde, hasta) {
   const turnos = await entreFechas("turnos", "fechaApertura", desde, hasta);
@@ -22,10 +22,11 @@ export async function obtenerMovimientos(desde, hasta) {
   const finDeTurnos = turnos.map((t) => aDate(t.fechaCierre) ?? ahora);
   const hastaMovimientos = new Date(Math.max(hasta.getTime(), ...finDeTurnos.map((f) => f.getTime())));
 
-  const [ventas, egresos] = await Promise.all([
+  const [ventas, egresos, guardados] = await Promise.all([
     entreFechas("ventas", "timestamp", desde, hastaMovimientos),
     entreFechas("egresos", "fecha", desde, hastaMovimientos),
+    entreFechas("guardados", "fecha", desde, hastaMovimientos),
   ]);
 
-  return { turnos, ventas, egresos };
+  return { turnos, ventas, egresos, guardados };
 }

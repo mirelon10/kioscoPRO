@@ -8,41 +8,44 @@ function enRango(fecha, desde, hasta) {
 }
 
 /**
- * Calcula los totales del panel de administración.
+ * Calcula los totales del panel de administración, con el mismo criterio que el cierre de turno:
  *
- * - Los totales por método de pago incluyen las recargas SUBE (es plata que entró).
- * - `sube` es un desglose informativo, no se suma de nuevo al total.
- * - La diferencia de caja de cada turno usa todas sus ventas en efectivo (también las SUBE),
- *   aunque caigan fuera del rango de fechas filtrado.
+ * - Las ventas de productos se totalizan por método de pago; las recargas SUBE van aparte
+ *   (no se suman de nuevo en el método con que se cobraron). Total ventas = métodos + SUBE.
+ * - Cada turno muestra su cierre completo (calcularCajaTurno) con todos sus movimientos,
+ *   aunque alguno caiga fuera del rango de fechas filtrado.
  */
-export function calcularResumen({ turnos, ventas, egresos, desde, hasta, empleadoId = "" }) {
+export function calcularResumen({ turnos, ventas, egresos, guardados = [], desde, hasta, empleadoId = "" }) {
   const filtrar = (lista) => (empleadoId ? lista.filter((x) => x.empleadoId === empleadoId) : lista);
 
   const turnosFiltrados = filtrar(turnos);
   const todasLasVentas = filtrar(ventas.map(normalizarVenta));
   const todosLosEgresos = filtrar(egresos);
+  const todosLosGuardados = filtrar(guardados);
 
   const ventasDelRango = todasLasVentas.filter((v) => enRango(aDate(v.timestamp), desde, hasta));
   const egresosDelRango = todosLosEgresos.filter((e) => enRango(aDate(e.fecha), desde, hasta));
+  const guardadosDelRango = todosLosGuardados.filter((g) => enRango(aDate(g.fecha), desde, hasta));
 
   const porMetodo = Object.fromEntries(METODOS_PAGO.map((m) => [m, 0]));
   let sube = 0;
   for (const v of ventasDelRango) {
-    if (v.metodoPago in porMetodo) porMetodo[v.metodoPago] += v.total;
     if (v.tipo === "sube") sube += v.total;
+    else if (v.metodoPago in porMetodo) porMetodo[v.metodoPago] += v.total;
   }
   for (const m of METODOS_PAGO) porMetodo[m] = redondear(porMetodo[m]);
 
-  const totalVentas = redondear(METODOS_PAGO.reduce((s, m) => s + porMetodo[m], 0));
+  const totalVentas = redondear(METODOS_PAGO.reduce((s, m) => s + porMetodo[m], 0) + sube);
   const totalEgresos = redondear(egresosDelRango.reduce((s, e) => s + (Number(e.monto) || 0), 0));
+  const totalGuardado = redondear(guardadosDelRango.reduce((s, g) => s + (Number(g.monto) || 0), 0));
 
   const filasTurnos = turnosFiltrados.map((t) => {
     const caja = calcularCajaTurno({
       cajaInicial: t.cajaInicial,
       ventas: todasLasVentas.filter((v) => v.turnoId === t.id),
       egresos: todosLosEgresos.filter((e) => e.turnoId === t.id),
+      guardados: todosLosGuardados.filter((g) => g.turnoId === t.id),
     });
-    const cerrado = t.estado === "cerrado" && t.cajaFinal != null;
 
     return {
       id: t.id,
@@ -53,15 +56,14 @@ export function calcularResumen({ turnos, ventas, egresos, desde, hasta, emplead
       cierre: aDate(t.fechaCierre),
       cerradoPor: t.cerradoPorNombre && t.cerradoPor !== t.empleadoId ? t.cerradoPorNombre : null,
       cajaInicial: caja.cajaInicial,
-      cajaFinal: cerrado ? Number(t.cajaFinal) : null,
-      efectivo: caja.efectivo,
+      efectivo: caja.porMetodo["Efectivo"],
       mercadoPago: caja.porMetodo["Mercado Pago"],
       tarjeta: caja.porMetodo["Tarjeta"],
-      totalVentas: caja.totalVentas,
       sube: caja.sube,
+      totalVentas: caja.totalVentas,
       egresos: caja.egresos,
-      esperado: caja.esperado,
-      diferencia: cerrado ? redondear(Number(t.cajaFinal) - caja.esperado) : null,
+      guardado: caja.guardado,
+      total: caja.total,
     };
   });
 
@@ -70,6 +72,7 @@ export function calcularResumen({ turnos, ventas, egresos, desde, hasta, emplead
     sube: redondear(sube),
     totalVentas,
     totalEgresos,
+    totalGuardado,
     neto: redondear(totalVentas - totalEgresos),
     turnos: filasTurnos,
     egresos: egresosDelRango.sort((a, b) => (aDate(b.fecha) ?? 0) - (aDate(a.fecha) ?? 0)),

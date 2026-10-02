@@ -100,13 +100,21 @@ total y el vuelto, descuenta el stock y guarda la venta. Si dos cajas venden la 
 una de las dos falla en lugar de dejar stock negativo.
 
 **Turnos:** se abren con el efectivo inicial. Mientras el turno está abierto, la pantalla de *Caja y turnos*
-muestra en vivo el cierre completo: lo vendido en efectivo, Mercado Pago y tarjeta, el total, cuánto fue de
-recargas SUBE (ya incluidas en el método con que se cobraron) y
-`caja inicial + ventas en efectivo − egresos = efectivo esperado`. Al cerrar, el monto
-contado viene precargado con el esperado; si el empleado contó otra cosa, lo corrige y queda registrada
-la diferencia (faltante/sobrante). Antes de confirmar y después de cerrar se muestra el resumen completo.
-Ni el esperado ni el desglose se guardan: el panel los recalcula siempre desde las ventas y los egresos del
-turno, y la tabla *Turnos del período* muestra el desglose de cada turno.
+muestra en vivo el cierre en un solo total:
+
+```
+Efectivo + Mercado Pago + Tarjeta (ventas de productos) + Recargas SUBE
+− Caja inicial − Egresos − Caja de guardado = TOTAL
+```
+
+Las recargas SUBE van en su propia línea (no se suman de nuevo en el método con que se cobraron). Al cerrar
+no se cuenta la plata: se confirma con el detalle a la vista y después se muestra el resumen. En `cajaFinal`
+se registra el efectivo que debería quedar en el cajón (caja inicial + todo lo cobrado en efectivo − egresos
+− guardado). El desglose no se guarda: el panel lo recalcula siempre desde los movimientos del turno.
+
+**Caja de guardado:** durante el turno, el empleado pasa efectivo de la caja a la caja de guardado (debajo del
+cierre, en *Caja y turnos*). No puede guardar más efectivo del que hay en el cajón. Cada guardado queda
+registrado con su hora, no se puede borrar y se resta del total del turno.
 
 **Inventario:** sección para todos los usuarios. El admin da de alta, edita y borra productos. El empleado ve
 el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja por rotura o
@@ -130,6 +138,7 @@ fechas son valores reales de Excel, se pueden sumar y filtrar.
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
 | `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
 | `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, fecha` | Empleado con turno abierto. **Inmutables.** |
+| `guardados/{id}` | `turnoId, empleadoId, empleadoNombre, monto, fecha` | Caja de guardado. Empleado con turno abierto. **Inmutables.** |
 
 Las fechas siempre las pone el servidor (`serverTimestamp`) y las reglas lo verifican.
 
