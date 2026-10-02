@@ -286,6 +286,34 @@ describe("ventas", () => {
     await assertSucceeds(batch.commit());
   });
 
+  test("venta sin conexión: venta + increment del stock en un batch, como la sube la app al reconectar", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }) });
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const batch = writeBatch(fs);
+    batch.update(doc(fs, "productos/p1"), { stock: increment(-2) });
+    batch.set(doc(fs, "ventas/v-offline"), venta(ANA));
+    await assertSucceeds(batch.commit());
+  });
+
+  test("venta sin conexión con stock agotado: el batch se rechaza, pero la venta sola entra", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 1 }) });
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const batch = writeBatch(fs);
+    batch.update(doc(fs, "productos/p1"), { stock: increment(-2) });
+    batch.set(doc(fs, "ventas/v-offline"), venta(ANA));
+    await assertFails(batch.commit());
+    await assertSucceeds(setDoc(doc(fs, "ventas/v-offline"), venta(ANA)));
+  });
+
+  test("una venta sin conexión que ya entró por la transacción no se duplica", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await assertSucceeds(setDoc(doc(fs, "ventas/v1"), venta(ANA)));
+    await assertFails(setDoc(doc(fs, "ventas/v1"), venta(ANA)));
+  });
+
   test("en efectivo el pago tiene que cubrir el total; en otros medios no hay pago ni vuelto", async () => {
     const fs = comoAna();
     await abrirTurno(fs, ANA);

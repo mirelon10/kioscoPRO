@@ -12,6 +12,7 @@ export {
   collection,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
   setDoc,
   updateDoc,
@@ -26,6 +27,7 @@ export {
   writeBatch,
   serverTimestamp,
   increment,
+  waitForPendingWrites,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 export {
   onAuthStateChanged,

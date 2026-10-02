@@ -101,9 +101,9 @@ async function alAbrir() {
   const cajaInicial = parsearMonto(input.value);
   if (!(cajaInicial >= 0)) return avisar("Monto inválido", "Ingresá cuánto dinero hay en la caja (puede ser 0).");
 
-  await abrirTurno(sesion.usuario, cajaInicial);
+  const pendiente = await abrirTurno(sesion.usuario, cajaInicial);
   input.value = "";
-  notificarExito("Turno abierto");
+  notificarRegistro("Turno abierto", pendiente);
 }
 
 async function alGuardar() {
@@ -144,6 +144,9 @@ async function alCerrar() {
   if (!ok) return;
 
   // Si los egresos superaron al efectivo, en el cajón no queda nada (no puede ser negativo).
-  await cerrarTurno(sesion.turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
-  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja) });
+  const pendiente = await cerrarTurno(sesion.turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
+  mostrarDetalle({
+    titulo: pendiente ? "Turno cerrado sin conexión (se sube al volver internet)" : "Turno cerrado",
+    contenido: desgloseCierre(caja),
+  });
 }

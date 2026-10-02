@@ -4,7 +4,7 @@ import { buscarCoincidencias, buscarExacto } from "../core/productos.js";
 import { calcularVuelto } from "../core/caja.js";
 import { registrarVenta, registrarRecargaSube } from "../data/ventas.js";
 import { sesion, alCambiarSesion } from "../estado.js";
-import { avisar, conBoton, notificarExito } from "../ui.js";
+import { avisar, conBoton, notificarRegistro } from "../ui.js";
 
 /** productoId -> cantidad */
 const carrito = new Map();
@@ -244,7 +244,7 @@ async function cobrar() {
     return avisar("Pago insuficiente", "Ingresá con cuánto paga el cliente.");
   }
 
-  const { total, vuelto } = await registrarVenta({
+  const { total, vuelto, pendiente } = await registrarVenta({
     turnoId: sesion.turno.id,
     usuario: sesion.usuario,
     carrito: [...carrito].map(([productoId, cantidad]) => ({ productoId, cantidad })),
@@ -252,10 +252,11 @@ async function cobrar() {
     montoRecibido,
   });
 
-  notificarExito(
+  notificarRegistro(
     vuelto != null
       ? `Cobrado ${formatearMoneda(total)} · Vuelto ${formatearMoneda(vuelto)}`
       : `Venta cobrada: ${formatearMoneda(total)}`,
+    pendiente,
   );
   carrito.clear();
   inputPagaCon.value = "";
@@ -271,8 +272,8 @@ async function cargarSube() {
   const monto = parsearMonto(input.value);
   if (!(monto > 0)) return avisar("Monto inválido", "Ingresá un monto mayor a 0.");
 
-  await registrarRecargaSube({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto, metodoPago: selectMetodo.value });
+  const { pendiente } = await registrarRecargaSube({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto, metodoPago: selectMetodo.value });
 
-  notificarExito(`Recarga SUBE registrada: ${formatearMoneda(monto)}`);
+  notificarRegistro(`Recarga SUBE registrada: ${formatearMoneda(monto)}`, pendiente);
   input.value = "";
 }

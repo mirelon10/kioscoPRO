@@ -4,7 +4,7 @@ import { aDate, fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } fro
 import { ORIGENES_EGRESO, TIPOS_EGRESO, etiquetaTipoEgreso, normalizarEgreso, totalizarEgresos } from "../core/egresos.js";
 import { listarEgresos, registrarEgreso } from "../data/egresos.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
-import { avisar, confirmar, conBoton, mostrarError, notificarExito } from "../ui.js";
+import { avisar, confirmar, conBoton, mostrarError, notificarRegistro } from "../ui.js";
 
 export function iniciarEgresos() {
   $("form-egreso").addEventListener("submit", (e) => {
@@ -127,8 +127,8 @@ async function alRegistrar(form, origen) {
     if (!ok) return;
   }
 
-  await registrarEgreso({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto, motivo, tipo, origen });
+  const pendiente = await registrarEgreso({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto, motivo, tipo, origen });
   form.reset();
-  notificarExito(origen === "guardado" ? "Egreso pagado con la caja de guardado" : "Egreso registrado");
+  notificarRegistro(origen === "guardado" ? "Egreso pagado con la caja de guardado" : "Egreso registrado", pendiente);
   cargarEgresos();
 }

@@ -7,7 +7,8 @@ import { armarVenta, normalizarVenta } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
 import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias, calcularAjusteStock } from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
-import { calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
+import { armarCobro, calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
+import { conLimiteDeTiempo, esErrorDeConexion, TiempoAgotado } from "../../public/js/lib/espera.js";
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
 import { normalizarEgreso, totalizarEgresos, etiquetaTipoEgreso } from "../../public/js/core/egresos.js";
 
@@ -262,6 +263,49 @@ describe("calcularVuelto", () => {
   test("informa cuánto falta si no alcanza, y nada si no hay monto", () => {
     assert.deepEqual(calcularVuelto(2600, 2000), { vuelto: null, falta: 600 });
     assert.deepEqual(calcularVuelto(100, NaN), { vuelto: null, falta: null });
+  });
+});
+
+describe("armarCobro", () => {
+  const alfajor = { nombre: "Alfajor", precio: 800, stock: 10 };
+  const carrito = [{ productoId: "a", cantidad: 2 }];
+
+  test("en efectivo calcula el vuelto sobre el total real", () => {
+    const r = armarCobro(carrito, [alfajor], "Efectivo", 2000);
+    assert.equal(r.total, 1600);
+    assert.equal(r.vuelto, 400);
+    assert.deepEqual(r.nuevosStocks, [8]);
+  });
+
+  test("en efectivo rechaza el pago que no alcanza o falta", () => {
+    assert.throws(() => armarCobro(carrito, [alfajor], "Efectivo", 1500), /faltan/);
+    assert.throws(() => armarCobro(carrito, [alfajor], "Efectivo", null), /no alcanza/);
+  });
+
+  test("con otros medios no hay vuelto", () => {
+    assert.equal(armarCobro(carrito, [alfajor], "Tarjeta", null).vuelto, null);
+  });
+});
+
+describe("espera", () => {
+  test("conLimiteDeTiempo devuelve el resultado si llega a tiempo", async () => {
+    assert.equal(await conLimiteDeTiempo(Promise.resolve(5), 50), 5);
+  });
+
+  test("conLimiteDeTiempo rechaza con TiempoAgotado si tarda demasiado", async () => {
+    const lenta = new Promise((resolver) => setTimeout(resolver, 200));
+    await assert.rejects(conLimiteDeTiempo(lenta, 10), TiempoAgotado);
+  });
+
+  test("conLimiteDeTiempo deja pasar el error original", async () => {
+    await assert.rejects(conLimiteDeTiempo(Promise.reject(new ErrorNegocio("x")), 50), ErrorNegocio);
+  });
+
+  test("distingue errores de conexión de los de permisos o datos", () => {
+    assert.ok(esErrorDeConexion({ code: "unavailable" }));
+    assert.ok(esErrorDeConexion(new TiempoAgotado()));
+    assert.ok(!esErrorDeConexion({ code: "permission-denied" }));
+    assert.ok(!esErrorDeConexion(new ErrorNegocio("Stock insuficiente")));
   });
 });
 

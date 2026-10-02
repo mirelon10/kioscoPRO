@@ -137,6 +137,22 @@ para administradores. Los egresos anteriores a la clasificación se muestran com
 **Exportar a Excel:** desde el resumen de caja, con tres hojas (Resumen, Turnos, Egresos). Los montos y las
 fechas son valores reales de Excel, se pueden sumar y filtrar.
 
+**Sin conexión** ([`data/conexion.js`](public/js/data/conexion.js)): Firestore guarda cada escritura en el
+dispositivo y la sube sola al volver internet, en orden y aunque se recargue la página. La app no espera la
+confirmación del servidor cuando no hay red (o si tarda más de 5 s), y la barra lateral muestra *Sin conexión*
+o *Subiendo movimientos…*. Sin conexión se puede:
+
+- **Cobrar:** si no hay red, o si la transacción no responde en 8 s, la venta se arma con los precios y el stock
+  de la copia local y se guarda en un batch con el stock descontado con `increment()`. Usa el mismo id que la
+  transacción, así que si esta llegó a guardarse igual, la copia se rechaza y no se duplica. Si al subirse el
+  batch es rechazado (otra caja vendió el mismo producto y el stock quedaría negativo), se sube la venta sola
+  y se avisa que hay que revisar el stock.
+- Registrar recargas SUBE, egresos pagados con la caja, y abrir o cerrar el propio turno. El cierre se sube
+  después de las ventas hechas antes, así que las reglas no las rechazan por turno cerrado.
+
+Necesitan conexión: todo lo que mueve la caja de guardado (transacciones), el cierre de un turno ajeno desde
+*Administración* y salir del sistema mientras haya movimientos sin subir.
+
 ## Modelo de datos
 
 | Colección | Documento | Quién escribe |
@@ -162,7 +178,10 @@ caja del turno.
   exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
   servidor (Cloud Functions, que necesitan el plan Blaze).
 - Los ajustes de stock no dejan historial (quién ajustó, cuándo y cuánto).
-- Cobrar requiere conexión (las transacciones no funcionan offline). El catálogo sí carga desde la caché local.
+- Sin conexión hay que tener la app ya abierta: no hay service worker, así que recargar la página sin
+  internet no la carga. Las ventas sin conexión llevan la hora en que se suben (las reglas exigen
+  `timestamp == request.time`), no la hora real del cobro. Si el admin cierra el turno mientras el empleado
+  tiene ventas sin subir, esas ventas se rechazan (la app avisa para anotarlas).
 - La recarga SUBE no calcula vuelto (solo la venta de productos).
 - Datos anteriores a la migración: los productos con `codigoBarra` y las ventas SUBE viejas
   (`metodoPago: "Sube"`) se leen bien y se normalizan al editarlos. Si hubiera egresos muy viejos

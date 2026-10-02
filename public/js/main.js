@@ -4,6 +4,12 @@ import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
 import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
 import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
+import {
+  alCambiarConexion,
+  alProblemaDeSincronizacion,
+  haySincronizacionPendiente,
+  revisarPendientesAlIniciar,
+} from "./data/conexion.js";
 import { sesion, actualizarSesion, esAdmin } from "./estado.js";
 import { avisar, mostrarError } from "./ui.js";
 import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
@@ -33,6 +39,10 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 });
 $("form-login").addEventListener("submit", iniciarSesion);
 $("btn-logout").addEventListener("click", cerrarSesion);
+
+alCambiarConexion(renderConexion);
+// Ventas o egresos hechos sin conexión que el servidor rechazó al subirlos.
+alProblemaDeSincronizacion(({ titulo, texto }) => avisar(titulo, texto));
 
 onAuthStateChanged(auth, async (usuario) => {
   const gen = ++generacion;
@@ -105,6 +115,10 @@ async function cerrarSesion() {
     avisar("Turno abierto", "Cerrá tu turno en 'Caja y turnos' antes de salir del sistema.");
     return irA("sec-turnos");
   }
+  if (haySincronizacionPendiente()) {
+    avisar("Hay movimientos sin subir", "Esperá a que vuelva internet y se suban antes de salir del sistema.");
+    return;
+  }
   try {
     await signOut(auth);
   } catch (error) {
@@ -114,6 +128,7 @@ async function cerrarSesion() {
 
 function escucharDatos(uid, gen) {
   const vigente = () => gen === generacion;
+  revisarPendientesAlIniciar();
   const alFallar = (mensaje) => (error) => vigente() && mostrarError(error, mensaje);
 
   desuscribir.push(
@@ -158,6 +173,19 @@ function escucharDatos(uid, gen) {
 function detenerListeners() {
   desuscribir.forEach((fn) => fn());
   desuscribir = [];
+}
+
+function renderConexion({ online, sincronizando }) {
+  const estado = $("estado-conexion");
+  mostrar(estado, !online || sincronizando);
+  estado.classList.toggle("sincronizando", online && sincronizando);
+  if (!online) {
+    estado.textContent = sincronizando
+      ? "⚠ Sin conexión · hay movimientos por subir"
+      : "⚠ Sin conexión · las ventas se guardan en este equipo";
+  } else if (sincronizando) {
+    estado.textContent = "↻ Subiendo movimientos…";
+  }
 }
 
 // ---------- Pantallas y navegación ----------

@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
   setDoc,
   query,
@@ -13,6 +14,7 @@ import {
   serverTimestamp,
 } from "../firebase.js";
 import { ErrorNegocio } from "../core/errores.js";
+import { esperarConfirmacion, estaOnline } from "./conexion.js";
 
 const turnosCol = collection(db, "turnos");
 // turnosActivos/{uid} = { turnoId }: candado que garantiza un solo turno abierto por empleado.
@@ -70,6 +72,10 @@ export function escucharTurnoActivo(uid, alCambiar, alFallar) {
   };
 }
 
+/**
+ * Sin conexión el turno queda abierto en el dispositivo y se sube al volver internet.
+ * @returns {Promise<boolean>} true si quedó pendiente de subir
+ */
 export async function abrirTurno(usuario, cajaInicial) {
   const turnoRef = doc(turnosCol);
   const batch = writeBatch(db);
@@ -83,13 +89,12 @@ export async function abrirTurno(usuario, cajaInicial) {
   batch.set(candado(usuario.uid), { turnoId: turnoRef.id });
 
   try {
-    await batch.commit();
+    return await esperarConfirmacion(batch.commit(), "Apertura de turno");
   } catch (error) {
     // Las reglas rechazan crear el candado si ya existe.
     if (error.code === "permission-denied") throw new ErrorNegocio("Ya tenés un turno abierto.");
     throw error;
   }
-  return turnoRef.id;
 }
 
 /**
@@ -97,6 +102,11 @@ export async function abrirTurno(usuario, cajaInicial) {
  * `efectivoEnCaja` (cajaFinal) es el efectivo que queda en el cajón según el sistema.
  * El admin puede cerrar el turno de otro empleado (las reglas lo verifican).
  * El desglose no se guarda: el panel lo recalcula siempre desde los movimientos del turno.
+ *
+ * Sin conexión el cierre queda pendiente. Firestore sube las escrituras en orden, así que el
+ * cierre llega después de las ventas y egresos hechos antes sin conexión (si llegara primero,
+ * las reglas las rechazarían por turno cerrado).
+ * @returns {Promise<boolean>} true si quedó pendiente de subir
  */
 export async function cerrarTurno(turno, efectivoEnCaja, usuario) {
   const batch = writeBatch(db);
@@ -108,9 +118,9 @@ export async function cerrarTurno(turno, efectivoEnCaja, usuario) {
     cerradoPorNombre: usuario.email,
   });
   // Solo si el candado apunta a este turno (un turno viejo puede no tenerlo).
-  const candadoSnap = await getDoc(candado(turno.empleadoId));
+  const candadoSnap = await (estaOnline() ? getDoc : getDocFromCache)(candado(turno.empleadoId));
   if (candadoSnap.exists() && candadoSnap.data().turnoId === turno.id) batch.delete(candado(turno.empleadoId));
-  await batch.commit();
+  return esperarConfirmacion(batch.commit(), "Cierre de turno");
 }
 
 // ---------- Ventas, egresos y caja de guardado de un turno (para calcular la caja) ----------
