@@ -273,3 +273,60 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 .saldo-guardado-card h4 { color: var(--dark); margin-bottom: 4px; }
 .saldo-monto { font-size: 1.8rem; color: var(--dark); font-variant-numeric: tabular-nums; }
 @media (max-width: 900px) { .form-egreso { grid-template-columns: 1fr; } .egreso-botones .text-muted { margin-left: 0; } }
+
+/* =====================================================================
+   CELULAR (Android / iOS)
+   ===================================================================== */
+
+/* Menú compacto: marca + estado + Salir en una fila, secciones abajo. */
+@media (max-width: 900px) {
+  .sidebar { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "marca pie" "menu menu"; gap: 10px 12px; padding: 12px; }
+  .sidebar-brand { grid-area: marca; margin: 0; font-size: 1.2rem; }
+  .sidebar-footer { grid-area: pie; border-top: none; padding: 0; display: flex; align-items: center; gap: 10px; }
+  .sidebar-footer .estado-turno { margin: 0; font-size: 0.8rem; white-space: nowrap; }
+  .sidebar-footer .user-info { display: none; }
+  .sidebar-footer .btn-block { width: auto; padding: 8px 12px; font-size: 0.9rem; }
+  .sidebar-nav { grid-area: menu; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .nav-btn { flex: 1 1 auto; justify-content: center; gap: 8px; padding: 10px 12px; font-size: 0.95rem; white-space: nowrap; }
+  .main-content { padding: 16px; }
+  .section-header { margin-bottom: 16px; padding-bottom: 10px; }
+  .section-header h2 { font-size: 1.4rem; }
+  .card { padding: 16px; }
+  .card-header { flex-wrap: wrap; }
+  .input-filtro { max-width: none; }
+}
+
+/* Botones y campos cómodos para el dedo (mínimo ~44 px). */
+@media (max-width: 900px), (pointer: coarse) {
+  .btn-sm { min-height: 44px; min-width: 44px; padding: 8px 12px; }
+  .btn-remove { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  .input-qty { min-height: 44px; font-size: 16px; }
+  .autocomplete-item { padding: 16px 15px; }
+}
+
+/* Carrito: el nombre arriba y cantidad / subtotal / quitar abajo. */
+@media (max-width: 700px) {
+  .cart-items-container { padding: 12px 16px; }
+  .cart-item { flex-wrap: wrap; gap: 8px; }
+  .cart-item-info { flex: 1 1 100%; }
+  .cart-item-actions { flex: 1 1 100%; justify-content: space-between; }
+  .cart-item-subtotal { width: auto; flex: 1; }
+}
+
+/* Tablas como tarjetas: una tarjeta por fila, cada dato con el nombre de su columna
+   (lo pone etiquetarTablasParaCelular en lib/dom.js). Así no hay que deslizar de costado. */
+@media (max-width: 700px) {
+  .table-modern thead { display: none; }
+  .table-modern, .table-modern tbody, .table-modern tr, .table-modern td { display: block; width: 100%; }
+  .table-modern tr { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px; margin-bottom: 12px; }
+  .table-modern td { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--border); text-align: right; min-height: 40px; }
+  .table-modern td:last-child { border-bottom: none; }
+  .table-modern td::before { content: attr(data-label); flex: 0 0 auto; text-align: left; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+  .table-modern td:not([data-label])::before { content: none; }
+  .table-modern td:empty { display: none; }
+  .table-modern td.acciones { justify-content: flex-end; gap: 8px; padding-top: 10px; }
+  .table-modern td.acciones .btn-sm { margin-right: 0; }
+  .table-modern td.tabla-vacia { display: block; text-align: center; border-bottom: none; }
+  .tabla-scroll { overflow-x: visible; }
+  .total-tabla, .total-detalle { text-align: left; }
+}
