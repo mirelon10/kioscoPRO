@@ -93,15 +93,16 @@ export async function abrirTurno(usuario, cajaInicial) {
 }
 
 /**
- * Cierra un turno guardando el efectivo contado y quién lo cerró, y libera el candado.
+ * Cierra un turno guardando quién lo cerró, y libera el candado.
+ * `efectivoEnCaja` (cajaFinal) es el efectivo que queda en el cajón según el sistema.
  * El admin puede cerrar el turno de otro empleado (las reglas lo verifican).
- * El esperado no se guarda: el panel lo recalcula siempre desde las ventas y egresos.
+ * El desglose no se guarda: el panel lo recalcula siempre desde los movimientos del turno.
  */
-export async function cerrarTurno(turno, cajaContada, usuario) {
+export async function cerrarTurno(turno, efectivoEnCaja, usuario) {
   const batch = writeBatch(db);
   batch.update(doc(turnosCol, turno.id), {
     estado: "cerrado",
-    cajaFinal: cajaContada,
+    cajaFinal: efectivoEnCaja,
     fechaCierre: serverTimestamp(),
     cerradoPor: usuario.uid,
     cerradoPorNombre: usuario.email,
@@ -112,7 +113,7 @@ export async function cerrarTurno(turno, cajaContada, usuario) {
   await batch.commit();
 }
 
-// ---------- Ventas y egresos de un turno (para calcular la caja) ----------
+// ---------- Ventas, egresos y caja de guardado de un turno (para calcular la caja) ----------
 
 // Se filtra también por empleadoId: las reglas solo dejan al empleado leer lo suyo.
 const delTurno = (coleccion, turno) =>
@@ -121,25 +122,29 @@ const delTurno = (coleccion, turno) =>
 const datosDe = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }));
 
 /**
- * Escucha en tiempo real las ventas y egresos del turno abierto: el monto a declarar
- * al cerrar y la lista de egresos del empleado se actualizan solos.
+ * Escucha en tiempo real las ventas, egresos y guardados del turno abierto: el cierre
+ * y las listas del empleado se actualizan solos.
  * @returns {() => void} función para dejar de escuchar
  */
 export function escucharMovimientosTurno(turno, alCambiar, alFallar) {
-  const movimientos = { ventas: null, egresos: null };
+  const movimientos = { ventas: null, egresos: null, guardados: null };
   const avisar = () => {
-    if (movimientos.ventas && movimientos.egresos) alCambiar({ ...movimientos });
+    if (movimientos.ventas && movimientos.egresos && movimientos.guardados) alCambiar({ ...movimientos });
   };
   const dejarVentas = onSnapshot(delTurno("ventas", turno), (s) => { movimientos.ventas = datosDe(s); avisar(); }, alFallar);
   const dejarEgresos = onSnapshot(delTurno("egresos", turno), (s) => { movimientos.egresos = datosDe(s); avisar(); }, alFallar);
+  const dejarGuardados = onSnapshot(delTurno("guardados", turno), (s) => { movimientos.guardados = datosDe(s); avisar(); }, alFallar);
   return () => {
     dejarVentas();
     dejarEgresos();
+    dejarGuardados();
   };
 }
 
 /** Lectura única, para que el admin vea la caja de un turno ajeno antes de cerrarlo. */
 export async function obtenerMovimientosTurno(turno) {
-  const [ventas, egresos] = await Promise.all([getDocs(delTurno("ventas", turno)), getDocs(delTurno("egresos", turno))]);
-  return { ventas: datosDe(ventas), egresos: datosDe(egresos) };
+  const [ventas, egresos, guardados] = await Promise.all(
+    ["ventas", "egresos", "guardados"].map((coleccion) => getDocs(delTurno(coleccion, turno))),
+  );
+  return { ventas: datosDe(ventas), egresos: datosDe(egresos), guardados: datosDe(guardados) };
 }

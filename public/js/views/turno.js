@@ -1,18 +1,17 @@
-import { $, h, mostrar } from "../lib/dom.js";
-import { formatearMoneda, parsearMonto, redondear } from "../lib/dinero.js";
-import { formatearFechaHora, horasDesde } from "../lib/fechas.js";
+import { $, h, mostrar, filaVacia } from "../lib/dom.js";
+import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
+import { aDate, formatearFechaHora, horasDesde } from "../lib/fechas.js";
 import { calcularCajaTurno } from "../core/caja.js";
 import { abrirTurno, cerrarTurno } from "../data/turnos.js";
+import { registrarGuardado } from "../data/guardados.js";
 import { sesion, alCambiarSesion } from "../estado.js";
 import { avisar, confirmar, conBoton, mostrarDetalle, notificarExito } from "../ui.js";
 import { desgloseCierre } from "./desglose.js";
 
 const formAbrir = $("vista-abrir-turno");
 const formCerrar = $("vista-cerrar-turno");
-const inputContado = $("cajaFinal");
+const formGuardado = $("form-guardado");
 
-/** Si el empleado escribió un monto, no se lo pisamos cuando entra una venta nueva. */
-let contadoEditado = false;
 /** Caja calculada del turno abierto (calcularCajaTurno), o null mientras carga. */
 let cajaActual = null;
 
@@ -25,9 +24,9 @@ export function iniciarTurno() {
     e.preventDefault();
     conBoton(e.submitter ?? formCerrar.querySelector("button"), alCerrar);
   });
-  inputContado.addEventListener("input", () => {
-    contadoEditado = true;
-    renderDiferencia();
+  formGuardado.addEventListener("submit", (e) => {
+    e.preventDefault();
+    conBoton(e.submitter ?? formGuardado.querySelector("button"), alGuardar);
   });
 
   alCambiarSesion((_, cambios) => {
@@ -40,15 +39,14 @@ function render() {
   const turno = sesion.turno;
   mostrar(formAbrir, !turno);
   mostrar(formCerrar, !!turno);
+  mostrar($("caja-guardado"), !!turno);
 
   const estado = $("estado-turno");
   estado.textContent = turno ? "● Turno abierto" : "○ Sin turno abierto";
   estado.classList.toggle("abierto", !!turno);
 
   if (!turno) {
-    contadoEditado = false;
     cajaActual = null;
-    inputContado.value = "";
     return;
   }
 
@@ -58,38 +56,39 @@ function render() {
 }
 
 function renderCaja(turno, movimientos) {
-  const boton = formCerrar.querySelector("button[type=submit]");
+  const botonCerrar = formCerrar.querySelector("button[type=submit]");
+  const botonGuardar = formGuardado.querySelector("button[type=submit]");
   const contenedor = $("cierre-desglose");
 
   if (!movimientos) {
     contenedor.replaceChildren(h("p", { class: "text-muted" }, "Calculando…"));
-    boton.disabled = true;
+    botonCerrar.disabled = botonGuardar.disabled = true;
     cajaActual = null;
-    renderDiferencia();
     return;
   }
 
   cajaActual = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...movimientos });
-  boton.disabled = false;
+  botonCerrar.disabled = botonGuardar.disabled = false;
   contenedor.replaceChildren(desgloseCierre(cajaActual));
-
-  if (!contadoEditado) inputContado.value = cajaActual.esperado.toFixed(2);
-  renderDiferencia();
+  renderGuardados(movimientos.guardados);
 }
 
-function renderDiferencia() {
-  const el = $("caja-diferencia");
-  const contado = parsearMonto(inputContado.value);
-  if (cajaActual == null || !(contado >= 0)) {
-    el.textContent = "";
-    return;
-  }
-  const diferencia = redondear(contado - cajaActual.esperado);
-  el.className = `diferencia-preview ${diferencia < 0 ? "text-danger" : diferencia > 0 ? "text-success" : ""}`;
-  el.textContent =
-    diferencia === 0
-      ? "Coincide con lo esperado."
-      : `${diferencia < 0 ? "Faltante" : "Sobrante"} de ${formatearMoneda(Math.abs(diferencia))}.`;
+function renderGuardados(guardados) {
+  const tbody = $("tabla-guardados");
+  $("total-guardado").textContent = formatearMoneda(cajaActual.guardado);
+  if (guardados.length === 0) return filaVacia(tbody, 2, "Todavía no guardaste plata en este turno.");
+
+  const ordenados = [...guardados].sort((a, b) => (aDate(b.fecha) ?? 0) - (aDate(a.fecha) ?? 0));
+  tbody.replaceChildren(
+    ...ordenados.map((g) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, aDate(g.fecha)?.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) ?? "-"),
+        h("td", { class: "num" }, formatearMoneda(g.monto)),
+      ),
+    ),
+  );
 }
 
 async function alAbrir() {
@@ -99,27 +98,47 @@ async function alAbrir() {
 
   await abrirTurno(sesion.usuario, cajaInicial);
   input.value = "";
-  contadoEditado = false;
   notificarExito("Turno abierto");
 }
 
-async function alCerrar() {
-  const cajaContada = parsearMonto(inputContado.value);
-  if (!(cajaContada >= 0)) return avisar("Monto inválido", "Ingresá el efectivo contado en la caja.");
+async function alGuardar() {
+  if (!sesion.turno || !cajaActual) return;
+  const input = $("guardado-monto");
+  const monto = parsearMonto(input.value);
+  if (!(monto > 0)) return avisar("Monto inválido", "Ingresá cuánta plata pasás a la caja de guardado.");
+  if (monto > cajaActual.efectivoEnCaja) {
+    return avisar(
+      "No alcanza el efectivo",
+      `En la caja hay ${formatearMoneda(cajaActual.efectivoEnCaja)} en efectivo. No podés guardar más que eso.`,
+    );
+  }
 
+  const ok = await confirmar({
+    titulo: "¿Pasar a la caja de guardado?",
+    texto: `Guardás ${formatearMoneda(monto)} en efectivo. Se resta del total del turno y no se puede deshacer.`,
+    boton: "Guardar",
+  });
+  if (!ok) return;
+
+  await registrarGuardado({ turnoId: sesion.turno.id, usuario: sesion.usuario, monto });
+  input.value = "";
+  notificarExito(`${formatearMoneda(monto)} en la caja de guardado`);
+}
+
+async function alCerrar() {
   // Se guarda antes de cerrar: al cerrarse, el turno deja de escucharse y cajaActual vuelve a null.
   const caja = cajaActual;
   if (!caja) return avisar("Calculando", "Esperá a que termine de calcularse la caja del turno.");
 
   const ok = await confirmar({
     titulo: "¿Cerrar turno?",
-    texto: "Revisá el detalle. Una vez cerrado no se puede modificar.",
-    contenido: desgloseCierre(caja, { contado: cajaContada }),
+    texto: "Revisá el cierre. Una vez cerrado no se puede modificar.",
+    contenido: desgloseCierre(caja),
     boton: "Cerrar turno",
   });
   if (!ok) return;
 
-  await cerrarTurno(sesion.turno, cajaContada, sesion.usuario);
-  contadoEditado = false;
-  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja, { contado: cajaContada }) });
+  // Si los egresos superaron al efectivo, en el cajón no queda nada (no puede ser negativo).
+  await cerrarTurno(sesion.turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
+  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja) });
 }

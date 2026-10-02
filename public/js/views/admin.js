@@ -1,5 +1,5 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
-import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
+import { formatearMoneda } from "../lib/dinero.js";
 import { fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
 import { calcularCajaTurno } from "../core/caja.js";
@@ -9,7 +9,7 @@ import { obtenerMovimientos } from "../data/reportes.js";
 import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
 import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
-import { avisar, conBoton, formularioModal, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
+import { avisar, confirmar, conBoton, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
 import { desgloseCierre } from "./desglose.js";
 
 const selectEmpleado = $("admin-empleado");
@@ -104,6 +104,7 @@ function renderResumen() {
   $("metric-sube").textContent = formatearMoneda(r.sube);
   $("metric-ventas").textContent = formatearMoneda(r.totalVentas);
   $("metric-egresos").textContent = formatearMoneda(r.totalEgresos);
+  $("metric-guardado").textContent = formatearMoneda(r.totalGuardado);
   $("metric-neto").textContent = formatearMoneda(r.neto);
 
   renderTurnos(r.turnos);
@@ -112,16 +113,10 @@ function renderResumen() {
 
 function renderTurnos(filas) {
   const tbody = $("tabla-turnos");
-  if (filas.length === 0) return filaVacia(tbody, 14, "No hay turnos en el período.");
+  if (filas.length === 0) return filaVacia(tbody, 13, "No hay turnos en el período.");
 
   tbody.replaceChildren(
     ...filas.map((t) => {
-      let celdaDiferencia = h("td", { class: "num text-muted" }, "-");
-      if (t.diferencia != null) {
-        const signo = t.diferencia > 0 ? "+" : "";
-        const clase = t.diferencia < 0 ? "text-danger" : "text-success";
-        celdaDiferencia = h("td", { class: `num ${clase}` }, h("strong", {}, signo + formatearMoneda(t.diferencia)));
-      }
       const celdaCierre = t.cierre
         ? h("td", {}, formatearFechaHora(t.cierre), t.cerradoPor ? h("small", { class: "text-muted d-block" }, `por ${t.cerradoPor}`) : null)
         : h("td", {}, h("span", { class: "badge badge-abierto" }, "Abierto"));
@@ -150,9 +145,8 @@ function renderTurnos(filas) {
         h("td", { class: "num" }, formatearMoneda(t.sube)),
         h("td", { class: "num" }, h("strong", {}, formatearMoneda(t.totalVentas))),
         h("td", { class: "num" }, formatearMoneda(t.egresos)),
-        h("td", { class: "num" }, formatearMoneda(t.esperado)),
-        h("td", { class: "num" }, t.cajaFinal != null ? formatearMoneda(t.cajaFinal) : "-"),
-        celdaDiferencia,
+        h("td", { class: "num" }, formatearMoneda(t.guardado)),
+        h("td", { class: "num" }, h("strong", {}, formatearMoneda(t.total))),
         celdaAcciones,
       );
     }),
@@ -173,16 +167,6 @@ async function exportarExcel() {
 
 // ---------- Cierre de un turno por el admin ----------
 
-// Los valores se cargan con textContent en alAbrir (nunca interpolados en el HTML).
-const FORMULARIO_CIERRE = `
-  <div class="swal-form">
-    <p id="cierre-empleado" class="text-muted"></p>
-    <div id="cierre-desglose"></div>
-    <label>Efectivo contado en caja
-      <input id="cierre-contado" type="number" min="0" step="0.01" class="swal2-input">
-    </label>
-  </div>`;
-
 async function cerrarTurnoDesdeAdmin(turnoId) {
   const turno = movimientos?.turnos.find((t) => t.id === turnoId);
   if (!turno) return;
@@ -190,24 +174,15 @@ async function cerrarTurnoDesdeAdmin(turnoId) {
   // Lectura fresca: el empleado pudo haber vendido después de cargar el resumen.
   const caja = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...(await obtenerMovimientosTurno(turno)) });
 
-  const datos = await formularioModal({
+  const ok = await confirmar({
     titulo: "Cerrar turno",
+    texto: `${turno.empleadoNombre || turno.empleadoId} · abierto el ${formatearFechaHora(turno.fechaApertura)}`,
+    contenido: desgloseCierre(caja),
     boton: "Cerrar turno",
-    contenido: FORMULARIO_CIERRE,
-    alAbrir: (popup) => {
-      const campo = (id) => popup.querySelector(`#cierre-${id}`);
-      campo("empleado").textContent = `${turno.empleadoNombre || turno.empleadoId} · abierto el ${formatearFechaHora(turno.fechaApertura)}`;
-      campo("desglose").replaceChildren(desgloseCierre(caja));
-      campo("contado").value = caja.esperado.toFixed(2);
-    },
-    leer: (popup) => {
-      const contado = parsearMonto(popup.querySelector("#cierre-contado").value);
-      return contado >= 0 ? { contado } : "Ingresá el efectivo contado (puede ser 0).";
-    },
   });
-  if (!datos) return;
+  if (!ok) return;
 
-  await cerrarTurno(turno, datos.contado, sesion.usuario);
-  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja, { contado: datos.contado }) });
+  await cerrarTurno(turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
+  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja) });
   await cargarResumen();
 }

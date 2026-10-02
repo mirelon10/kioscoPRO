@@ -180,5 +180,23 @@ service cloud.firestore {
 
       allow update, delete: if false;
     }
+
+    // ---------- Caja de guardado (inmutable) ----------
+    // Efectivo que el empleado pasa de la caja a la caja de guardado durante su turno.
+
+    match /guardados/{guardadoId} {
+      allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
+
+      allow create: if esPersonal()
+        && tieneExactamente(['turnoId', 'empleadoId', 'empleadoNombre', 'monto', 'fecha'])
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && esMonto(nuevo().monto) && nuevo().monto > 0
+        && nuevo().fecha == request.time
+        && nuevo().turnoId is string
+        && turnoAbiertoPropio(nuevo().turnoId);
+
+      allow update, delete: if false;
+    }
   }
 }
