@@ -7,11 +7,13 @@ import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno }
 import {
   alCambiarConexion,
   alProblemaDeSincronizacion,
+  estaOnline,
   haySincronizacionPendiente,
   revisarPendientesAlIniciar,
 } from "./data/conexion.js";
 import { sesion, actualizarSesion, esAdmin } from "./estado.js";
 import { avisar, mostrarError } from "./ui.js";
+import { conLimiteDeTiempo } from "./lib/espera.js";
 import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
 import { iniciarTurno } from "./views/turno.js";
 import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/egresos.js";
@@ -41,6 +43,11 @@ $("form-login").addEventListener("submit", iniciarSesion);
 $("btn-logout").addEventListener("click", cerrarSesion);
 
 alCambiarConexion(renderConexion);
+
+// Guarda la app en el dispositivo para poder abrirla sin internet (ver sw.js).
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch((error) => console.warn("No se pudo activar el modo sin conexión", error));
+}
 // Ventas o egresos hechos sin conexión que el servidor rechazó al subirlos.
 alProblemaDeSincronizacion(({ titulo, texto }) => avisar(titulo, texto));
 
@@ -76,13 +83,44 @@ onAuthStateChanged(auth, async (usuario) => {
 
 // ---------- Sesión ----------
 
-/** Lee el rol (custom claim). Fuerza la renovación del token para tomar roles recién asignados. */
+const ESPERA_TOKEN_MS = 5000;
+const claveRol = (uid) => `kiosco.rol.${uid}`;
+
+/**
+ * Lee el rol (custom claim). Fuerza la renovación del token para tomar roles recién asignados.
+ * Sin internet usa el token en caché y, si ya venció (dura 1 hora), el último rol conocido en
+ * este equipo. El rol solo decide qué pantallas se ven: los permisos los imponen las reglas.
+ */
 async function leerRol(usuario) {
   try {
-    return (await usuario.getIdTokenResult(true)).claims.rol;
+    const rol = (await conLimiteDeTiempo(usuario.getIdTokenResult(true), ESPERA_TOKEN_MS)).claims.rol;
+    recordarRol(usuario.uid, rol);
+    return rol;
+  } catch (error) {
+    try {
+      return (await conLimiteDeTiempo(usuario.getIdTokenResult(), ESPERA_TOKEN_MS)).claims.rol;
+    } catch {
+      const rol = rolRecordado(usuario.uid);
+      if (rol) return rol;
+      throw error;
+    }
+  }
+}
+
+function recordarRol(uid, rol) {
+  try {
+    if (rol) localStorage.setItem(claveRol(uid), rol);
+    else localStorage.removeItem(claveRol(uid));
   } catch {
-    // Sin internet: usar el token en caché.
-    return (await usuario.getIdTokenResult()).claims.rol;
+    // almacenamiento bloqueado: sin conexión habrá que esperar a tener internet
+  }
+}
+
+function rolRecordado(uid) {
+  try {
+    return localStorage.getItem(claveRol(uid));
+  } catch {
+    return null;
   }
 }
 
@@ -162,7 +200,8 @@ function escucharDatos(uid, gen) {
     actualizarSesion({ turno });
   };
 
-  adoptarTurnoSinCandado(uid)
+  // Sin conexión se saltea: consulta al servidor y solo sirve para turnos de antes de la migración.
+  (estaOnline() ? adoptarTurnoSinCandado(uid) : Promise.resolve())
     .catch((error) => console.error("No se pudo revisar turnos anteriores", error))
     .finally(() => {
       if (!vigente()) return;

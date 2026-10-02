@@ -13,16 +13,24 @@
     # Solo se permite cargar código de este sitio, del SDK de Firebase (gstatic), SweetAlert (jsdelivr) y SheetJS (Excel).
     # Si agregás otro servicio de Firebase o una librería nueva, sumá su dominio acá.
     # Las barras al final de línea hacen que TOML lo una en un solo renglón.
+    # connect-src incluye los CDN porque el service worker (sw.js) descarga las librerías con fetch para
+    # guardarlas y que la app abra sin internet.
     Content-Security-Policy = """\
       default-src 'self'; \
       script-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; \
       style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; \
       font-src 'self' https://cdnjs.cloudflare.com; \
       img-src 'self' data:; \
-      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; \
+      connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.sheetjs.com; \
       frame-src https://kioscopro-db07e.firebaseapp.com; \
       object-src 'none'; \
       base-uri 'self'; \
       form-action 'self'; \
       frame-ancestors 'none'\
       """
+
+# El navegador tiene que revisar siempre si hay un service worker nuevo.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

@@ -153,6 +153,13 @@ o *Subiendo movimientos…*. Sin conexión se puede:
 Necesitan conexión: todo lo que mueve la caja de guardado (transacciones), el cierre de un turno ajeno desde
 *Administración* y salir del sistema mientras haya movimientos sin subir.
 
+**Abrir la app sin internet** ([`sw.js`](public/sw.js)): un service worker guarda los archivos de la app y las
+librerías del CDN. Los archivos propios se piden primero a la red (siempre corre la última versión publicada)
+y, sin conexión o si tarda más de 4 s, se usa la copia guardada. Las librerías tienen la versión en la URL y se
+sirven desde la copia. Si el token de la sesión ya venció (dura 1 hora), se usa el último rol conocido en ese
+equipo; los permisos igual los imponen las reglas al subir. Al agregar un archivo a `public/` hay que sumarlo
+a `ARCHIVOS_APP` en `sw.js`: `tests/unit/sw.test.js` falla si falta.
+
 ## Modelo de datos
 
 | Colección | Documento | Quién escribe |
@@ -178,8 +185,10 @@ caja del turno.
   exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
   servidor (Cloud Functions, que necesitan el plan Blaze).
 - Los ajustes de stock no dejan historial (quién ajustó, cuándo y cuánto).
-- Sin conexión hay que tener la app ya abierta: no hay service worker, así que recargar la página sin
-  internet no la carga. Las ventas sin conexión llevan la hora en que se suben (las reglas exigen
+- Para abrir la app sin internet, el equipo tiene que haberla abierto antes con internet (así se instala el
+  service worker) y el usuario tiene que haber iniciado sesión ahí: sin conexión no se puede iniciar sesión.
+  La exportación a Excel sin conexión solo anda si ya se usó antes con internet en ese equipo.
+- Las ventas sin conexión llevan la hora en que se suben (las reglas exigen
   `timestamp == request.time`), no la hora real del cobro. Si el admin cierra el turno mientras el empleado
   tiene ventas sin subir, esas ventas se rechazan (la app avisa para anotarlas).
 - La recarga SUBE no calcula vuelto (solo la venta de productos).
