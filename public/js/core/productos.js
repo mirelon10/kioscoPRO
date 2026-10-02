@@ -66,3 +66,29 @@ export function buscarCoincidencias(productos, termino, limite = 8) {
 export function productosConStockBajo(productos, umbral = UMBRAL_STOCK_BAJO) {
   return productos.filter((p) => p.stock <= umbral).sort((a, b) => a.stock - b.stock);
 }
+
+/** Formas de ajustar el stock desde Inventario (las usan el admin y el empleado). */
+export const MODOS_AJUSTE_STOCK = {
+  ingreso: "Ingreso de mercadería (+)",
+  baja: "Baja: rotura, vencido, consumo (−)",
+  conteo: "Conteo: el stock real es",
+};
+
+/**
+ * Valida un ajuste de stock.
+ * Devuelve { cambio, stock } (`cambio` es lo que suma o resta; `stock` es el resultado esperado)
+ * o { error } con un mensaje para el usuario.
+ */
+export function calcularAjusteStock(stockActual, modo, cantidad) {
+  const texto = String(cantidad ?? "").trim();
+  const n = texto === "" ? NaN : Number(texto);
+  if (!(modo in MODOS_AJUSTE_STOCK)) return { error: "Elegí el tipo de ajuste." };
+  if (!Number.isInteger(n) || n < 0) return { error: "La cantidad debe ser un número entero mayor o igual a 0." };
+  if (modo !== "conteo" && n === 0) return { error: "La cantidad debe ser mayor a 0." };
+
+  const cambio = modo === "ingreso" ? n : modo === "baja" ? -n : n - stockActual;
+  const stock = stockActual + cambio;
+  if (stock < 0) return { error: `No se pueden dar de baja ${n}: hay ${stockActual} en stock.` };
+  if (cambio === 0) return { error: "El stock ya es ese, no hay nada que ajustar." };
+  return { cambio, stock };
+}

@@ -14,6 +14,7 @@ export {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
   addDoc,
   deleteDoc,
   query,
@@ -24,6 +25,7 @@ export {
   runTransaction,
   writeBatch,
   serverTimestamp,
+  increment,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 export {
   onAuthStateChanged,

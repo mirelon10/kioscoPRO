@@ -235,3 +235,18 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 .btn-excel:hover { background: #166534; }
 .badge-abierto { background: #dcfce7; color: #166534; }
 .d-block { display: block; }
+
+/* === DESGLOSE DEL CIERRE (pantalla de turno, cierre desde admin y resumen final) === */
+.cierre-detalle { text-align: left; }
+.desglose-titulo { font-size: 0.95rem; color: var(--dark); text-transform: uppercase; letter-spacing: 0.03em; margin: 14px auto 4px; max-width: 360px; }
+.cierre-detalle .desglose-titulo:first-child { margin-top: 0; }
+.desglose-nota { border-bottom: none !important; font-size: 0.9rem; }
+.desglose-nota dd { font-weight: 500; color: var(--text-muted); }
+.desglose-pie { max-width: 360px; margin: 10px auto 0; font-size: 0.8rem; }
+.swal2-html-container .desglose, .swal2-html-container .desglose-titulo, .swal2-html-container .desglose-pie { max-width: none; }
+.desglose > div.text-danger dt, .desglose > div.text-danger dd { color: var(--danger); }
+.desglose > div.text-success dt, .desglose > div.text-success dd { color: var(--success); }
+
+/* === AJUSTE DE STOCK === */
+.swal-form .swal2-select { margin: 4px 0 0; width: 100%; }
+.ajuste-resultado { min-height: 1.3em; font-weight: 600; color: var(--dark); }

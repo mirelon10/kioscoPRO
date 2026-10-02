@@ -9,6 +9,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   query,
   serverTimestamp,
   setDoc,
@@ -137,13 +138,22 @@ describe("productos", () => {
     await assertFails(setDoc(doc(fs, "productos/e"), producto({ campoRaro: true })));
   });
 
-  test("el empleado solo puede bajar el stock, nunca subirlo ni dejarlo negativo", async () => {
+  test("el empleado puede subir y bajar el stock, pero nunca dejarlo negativo ni tocar otros campos", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     const fs = comoAna();
     await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 4 }));
-    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 50 }));
+    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 50 })); // ingreso de mercadería
+    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: increment(-10) })); // baja
+    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 0 })); // conteo
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: increment(-1) })); // quedaría negativo
     await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: -1 }));
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 2.5 }));
     await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 3, precio: 1 }));
+  });
+
+  test("un usuario sin rol no puede tocar el stock", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }) });
+    await assertFails(updateDoc(doc(sinRol(), "productos/p1"), { stock: 6 }));
   });
 
   test("al editar, el admin puede borrar campos viejos como codigoBarra", async () => {

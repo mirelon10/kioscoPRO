@@ -9,7 +9,7 @@ import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
 import { iniciarTurno } from "./views/turno.js";
 import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/egresos.js";
 import { iniciarAdmin, reiniciarAdmin, abrirAdmin } from "./views/admin.js";
-import { iniciarStock } from "./views/stock.js";
+import { iniciarStock, renderStock } from "./views/stock.js";
 
 const ROLES = { admin: "Administrador", empleado: "Empleado" };
 
@@ -186,5 +186,6 @@ function irA(seccion) {
 
   if (seccion === "sec-pos") enfocarBuscador();
   if (seccion === "sec-egresos") cargarEgresos();
+  if (seccion === "sec-stock") renderStock();
   if (seccion === "sec-admin") abrirAdmin();
 }

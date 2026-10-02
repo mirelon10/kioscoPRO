@@ -1,10 +1,11 @@
-import { $, mostrar } from "../lib/dom.js";
+import { $, h, mostrar } from "../lib/dom.js";
 import { formatearMoneda, parsearMonto, redondear } from "../lib/dinero.js";
 import { formatearFechaHora, horasDesde } from "../lib/fechas.js";
 import { calcularCajaTurno } from "../core/caja.js";
 import { abrirTurno, cerrarTurno } from "../data/turnos.js";
 import { sesion, alCambiarSesion } from "../estado.js";
-import { avisar, confirmar, conBoton, notificarExito } from "../ui.js";
+import { avisar, confirmar, conBoton, mostrarDetalle, notificarExito } from "../ui.js";
+import { desgloseCierre } from "./desglose.js";
 
 const formAbrir = $("vista-abrir-turno");
 const formCerrar = $("vista-cerrar-turno");
@@ -12,7 +13,8 @@ const inputContado = $("cajaFinal");
 
 /** Si el empleado escribió un monto, no se lo pisamos cuando entra una venta nueva. */
 let contadoEditado = false;
-let esperadoActual = null;
+/** Caja calculada del turno abierto (calcularCajaTurno), o null mientras carga. */
+let cajaActual = null;
 
 export function iniciarTurno() {
   formAbrir.addEventListener("submit", (e) => {
@@ -45,7 +47,7 @@ function render() {
 
   if (!turno) {
     contadoEditado = false;
-    esperadoActual = null;
+    cajaActual = null;
     inputContado.value = "";
     return;
   }
@@ -57,40 +59,32 @@ function render() {
 
 function renderCaja(turno, movimientos) {
   const boton = formCerrar.querySelector("button[type=submit]");
+  const contenedor = $("cierre-desglose");
 
   if (!movimientos) {
-    for (const id of ["caja-efectivo", "caja-egresos", "caja-esperado"]) $(id).textContent = "Calculando…";
-    $("caja-inicial").textContent = formatearMoneda(turno.cajaInicial);
-    $("caja-otros").textContent = "";
+    contenedor.replaceChildren(h("p", { class: "text-muted" }, "Calculando…"));
     boton.disabled = true;
-    esperadoActual = null;
+    cajaActual = null;
+    renderDiferencia();
     return;
   }
 
-  const caja = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...movimientos });
-  esperadoActual = caja.esperado;
+  cajaActual = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...movimientos });
   boton.disabled = false;
+  contenedor.replaceChildren(desgloseCierre(cajaActual));
 
-  $("caja-inicial").textContent = formatearMoneda(caja.cajaInicial);
-  $("caja-efectivo").textContent = formatearMoneda(caja.efectivo);
-  $("caja-egresos").textContent = formatearMoneda(caja.egresos);
-  $("caja-esperado").textContent = formatearMoneda(caja.esperado);
-  $("caja-otros").textContent =
-    `${caja.cantidadVentas} venta(s) en el turno. ` +
-    `Mercado Pago y tarjeta: ${formatearMoneda(caja.otrosMedios)} (no entran a la caja).`;
-
-  if (!contadoEditado) inputContado.value = caja.esperado.toFixed(2);
+  if (!contadoEditado) inputContado.value = cajaActual.esperado.toFixed(2);
   renderDiferencia();
 }
 
 function renderDiferencia() {
   const el = $("caja-diferencia");
   const contado = parsearMonto(inputContado.value);
-  if (esperadoActual == null || !(contado >= 0)) {
+  if (cajaActual == null || !(contado >= 0)) {
     el.textContent = "";
     return;
   }
-  const diferencia = redondear(contado - esperadoActual);
+  const diferencia = redondear(contado - cajaActual.esperado);
   el.className = `diferencia-preview ${diferencia < 0 ? "text-danger" : diferencia > 0 ? "text-success" : ""}`;
   el.textContent =
     diferencia === 0
@@ -113,20 +107,19 @@ async function alCerrar() {
   const cajaContada = parsearMonto(inputContado.value);
   if (!(cajaContada >= 0)) return avisar("Monto inválido", "Ingresá el efectivo contado en la caja.");
 
-  const diferencia = esperadoActual == null ? 0 : redondear(cajaContada - esperadoActual);
-  const detalle =
-    diferencia === 0
-      ? "Coincide con lo esperado."
-      : `${diferencia < 0 ? "Faltante" : "Sobrante"} de ${formatearMoneda(Math.abs(diferencia))}.`;
+  // Se guarda antes de cerrar: al cerrarse, el turno deja de escucharse y cajaActual vuelve a null.
+  const caja = cajaActual;
+  if (!caja) return avisar("Calculando", "Esperá a que termine de calcularse la caja del turno.");
 
   const ok = await confirmar({
     titulo: "¿Cerrar turno?",
-    texto: `Declarás ${formatearMoneda(cajaContada)} en caja. ${detalle} No se puede modificar después.`,
+    texto: "Revisá el detalle. Una vez cerrado no se puede modificar.",
+    contenido: desgloseCierre(caja, { contado: cajaContada }),
     boton: "Cerrar turno",
   });
   if (!ok) return;
 
   await cerrarTurno(sesion.turno, cajaContada, sesion.usuario);
   contadoEditado = false;
-  notificarExito(`Turno cerrado · ${detalle}`);
+  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja, { contado: cajaContada }) });
 }

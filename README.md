@@ -21,7 +21,7 @@ public/                  ← lo que publica Netlify
     lib/                 ← utilidades: dinero, fechas, DOM, Excel
     core/                ← reglas de negocio puras (testeables con Node)
     data/                ← acceso a Firestore
-    views/               ← una vista por sección: pos, turno, egresos, admin, stock
+    views/               ← una vista por sección: pos, turno, egresos, admin, stock (+ desglose del cierre)
 firestore.rules          ← seguridad (la parte más importante)
 firestore.indexes.json   ← índices compuestos
 netlify.toml             ← publicación y cabeceras de seguridad (CSP)
@@ -100,10 +100,18 @@ total y el vuelto, descuenta el stock y guarda la venta. Si dos cajas venden la 
 una de las dos falla en lugar de dejar stock negativo.
 
 **Turnos:** se abren con el efectivo inicial. Mientras el turno está abierto, la pantalla de *Caja y turnos*
-muestra en vivo `caja inicial + ventas en efectivo − egresos = efectivo esperado`. Al cerrar, el monto
+muestra en vivo el cierre completo: lo vendido en efectivo, Mercado Pago y tarjeta, el total, cuánto fue de
+recargas SUBE (ya incluidas en el método con que se cobraron) y
+`caja inicial + ventas en efectivo − egresos = efectivo esperado`. Al cerrar, el monto
 contado viene precargado con el esperado; si el empleado contó otra cosa, lo corrige y queda registrada
-la diferencia (faltante/sobrante). El esperado no se guarda: el panel lo recalcula siempre desde las
-ventas y los egresos del turno.
+la diferencia (faltante/sobrante). Antes de confirmar y después de cerrar se muestra el resumen completo.
+Ni el esperado ni el desglose se guardan: el panel los recalcula siempre desde las ventas y los egresos del
+turno, y la tabla *Turnos del período* muestra el desglose de cada turno.
+
+**Inventario:** sección para todos los usuarios. El admin da de alta, edita y borra productos. El empleado ve
+el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja por rotura o
+vencimiento (−) o conteo (fija el número contado). Ingresos y bajas usan `increment()`, así no pisan una venta
+que entre mientras el modal está abierto.
 
 **Cierre forzado:** si un empleado se va sin cerrar, el admin lo cierra desde *Administración → Turnos del
 período* (botón *Cerrar*). Queda registrado quién lo cerró.
@@ -117,7 +125,7 @@ fechas son valores reales de Excel, se pueden sumar y filtrar.
 
 | Colección | Documento | Quién escribe |
 |---|---|---|
-| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El empleado solo puede **bajar** `stock` al cobrar. |
+| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El empleado solo puede cambiar `stock` (al cobrar y desde Inventario), nunca dejarlo negativo. |
 | `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
 | `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
@@ -130,10 +138,11 @@ caja del turno.
 
 ## Limitaciones conocidas
 
-- Sin servidor propio, las reglas verifican que el empleado solo **baje** el stock y que la venta sea de su
-  turno abierto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
+- Sin servidor propio, las reglas verifican que el empleado solo toque el campo `stock` y que la venta sea de
+  su turno abierto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
   exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
   servidor (Cloud Functions, que necesitan el plan Blaze).
+- Los ajustes de stock no dejan historial (quién ajustó, cuándo y cuánto).
 - Cobrar requiere conexión (las transacciones no funcionan offline). El catálogo sí carga desde la caché local.
 - La recarga SUBE no calcula vuelto (solo la venta de productos).
 - Datos anteriores a la migración: los productos con `codigoBarra` y las ventas SUBE viejas

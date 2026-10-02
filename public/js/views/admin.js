@@ -1,5 +1,5 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
-import { formatearMoneda, parsearMonto, redondear } from "../lib/dinero.js";
+import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
 import { fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
 import { calcularCajaTurno } from "../core/caja.js";
@@ -9,21 +9,16 @@ import { obtenerMovimientos } from "../data/reportes.js";
 import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
 import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
-import { avisar, conBoton, formularioModal, mostrarError, notificarExito } from "../ui.js";
-import { renderStock } from "./stock.js";
+import { avisar, conBoton, formularioModal, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
+import { desgloseCierre } from "./desglose.js";
 
 const selectEmpleado = $("admin-empleado");
-const btnResumen = $("btn-ver-ventas");
-const btnStock = $("btn-ver-stock");
 const btnExcel = $("btn-exportar-excel");
 
 /** Último período consultado: cambiar de empleado filtra sin volver a leer Firestore. */
 let movimientos = null;
 
 export function iniciarAdmin() {
-  btnResumen.addEventListener("click", () => mostrarPestania("resumen"));
-  btnStock.addEventListener("click", () => mostrarPestania("stock"));
-
   $("form-filtro-admin").addEventListener("submit", (e) => {
     e.preventDefault();
     cargarResumen();
@@ -48,28 +43,11 @@ export function reiniciarAdmin() {
   selectEmpleado.replaceChildren(h("option", { value: "" }, "Todos los empleados"));
   movimientos = null;
   btnExcel.disabled = true;
-  mostrarPestania("resumen", { cargar: false });
 }
 
 export function abrirAdmin() {
   renderAlertasStock();
   cargarResumen();
-}
-
-function mostrarPestania(pestania, { cargar = true } = {}) {
-  const esResumen = pestania === "resumen";
-  mostrar($("admin-resumen-view"), esResumen);
-  mostrar($("admin-stock-view"), !esResumen);
-
-  for (const [boton, activo] of [[btnResumen, esResumen], [btnStock, !esResumen]]) {
-    boton.classList.toggle("btn-primary", activo);
-    boton.classList.toggle("btn-secondary", !activo);
-    boton.setAttribute("aria-selected", String(activo));
-  }
-
-  if (!cargar) return;
-  if (esResumen) cargarResumen();
-  else renderStock();
 }
 
 function renderAlertasStock() {
@@ -134,7 +112,7 @@ function renderResumen() {
 
 function renderTurnos(filas) {
   const tbody = $("tabla-turnos");
-  if (filas.length === 0) return filaVacia(tbody, 10, "No hay turnos en el período.");
+  if (filas.length === 0) return filaVacia(tbody, 14, "No hay turnos en el período.");
 
   tbody.replaceChildren(
     ...filas.map((t) => {
@@ -167,6 +145,10 @@ function renderTurnos(filas) {
         celdaCierre,
         h("td", { class: "num" }, formatearMoneda(t.cajaInicial)),
         h("td", { class: "num" }, formatearMoneda(t.efectivo)),
+        h("td", { class: "num" }, formatearMoneda(t.mercadoPago)),
+        h("td", { class: "num" }, formatearMoneda(t.tarjeta)),
+        h("td", { class: "num" }, formatearMoneda(t.sube)),
+        h("td", { class: "num" }, h("strong", {}, formatearMoneda(t.totalVentas))),
         h("td", { class: "num" }, formatearMoneda(t.egresos)),
         h("td", { class: "num" }, formatearMoneda(t.esperado)),
         h("td", { class: "num" }, t.cajaFinal != null ? formatearMoneda(t.cajaFinal) : "-"),
@@ -195,12 +177,7 @@ async function exportarExcel() {
 const FORMULARIO_CIERRE = `
   <div class="swal-form">
     <p id="cierre-empleado" class="text-muted"></p>
-    <dl class="desglose">
-      <div><dt>Caja inicial</dt><dd id="cierre-inicial"></dd></div>
-      <div><dt>+ Ventas en efectivo</dt><dd id="cierre-efectivo"></dd></div>
-      <div><dt>− Egresos</dt><dd id="cierre-egresos"></dd></div>
-      <div class="desglose-total"><dt>= Efectivo esperado</dt><dd id="cierre-esperado"></dd></div>
-    </dl>
+    <div id="cierre-desglose"></div>
     <label>Efectivo contado en caja
       <input id="cierre-contado" type="number" min="0" step="0.01" class="swal2-input">
     </label>
@@ -220,10 +197,7 @@ async function cerrarTurnoDesdeAdmin(turnoId) {
     alAbrir: (popup) => {
       const campo = (id) => popup.querySelector(`#cierre-${id}`);
       campo("empleado").textContent = `${turno.empleadoNombre || turno.empleadoId} · abierto el ${formatearFechaHora(turno.fechaApertura)}`;
-      campo("inicial").textContent = formatearMoneda(caja.cajaInicial);
-      campo("efectivo").textContent = formatearMoneda(caja.efectivo);
-      campo("egresos").textContent = formatearMoneda(caja.egresos);
-      campo("esperado").textContent = formatearMoneda(caja.esperado);
+      campo("desglose").replaceChildren(desgloseCierre(caja));
       campo("contado").value = caja.esperado.toFixed(2);
     },
     leer: (popup) => {
@@ -234,9 +208,6 @@ async function cerrarTurnoDesdeAdmin(turnoId) {
   if (!datos) return;
 
   await cerrarTurno(turno, datos.contado, sesion.usuario);
-  const diferencia = redondear(datos.contado - caja.esperado);
-  notificarExito(
-    diferencia === 0 ? "Turno cerrado sin diferencias" : `Turno cerrado · diferencia ${diferencia > 0 ? "+" : ""}${formatearMoneda(diferencia)}`,
-  );
+  mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja, { contado: datos.contado }) });
   await cargarResumen();
 }

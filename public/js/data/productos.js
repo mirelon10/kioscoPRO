@@ -1,4 +1,4 @@
-import { db, collection, doc, addDoc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "../firebase.js";
+import { db, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, increment } from "../firebase.js";
 import { normalizarProducto } from "../core/productos.js";
 
 const productosCol = collection(db, "productos");
@@ -23,6 +23,16 @@ export function crearProducto(producto) {
 /** Reemplaza el documento completo: así se eliminan campos viejos como `codigoBarra`. */
 export function guardarProducto(id, producto) {
   return setDoc(doc(productosCol, id), producto);
+}
+
+/**
+ * Ajusta solo el stock (lo pueden hacer el admin y el empleado).
+ * Ingresos y bajas usan increment(): si se vende algo mientras el modal está abierto, no se pisa
+ * esa venta. Si el resultado quedara negativo, las reglas lo rechazan.
+ * El conteo fija el número contado.
+ */
+export function ajustarStock(id, { modo, cambio, stock }) {
+  return updateDoc(doc(productosCol, id), { stock: modo === "conteo" ? stock : increment(cambio) });
 }
 
 export function eliminarProducto(id) {
