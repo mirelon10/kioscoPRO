@@ -2,6 +2,7 @@ import { redondear } from "../lib/dinero.js";
 import { aDate } from "../lib/fechas.js";
 import { METODOS_PAGO, normalizarVenta } from "./ventas.js";
 import { calcularCajaTurno } from "./caja.js";
+import { totalizarEgresos } from "./egresos.js";
 
 function enRango(fecha, desde, hasta) {
   return fecha != null && fecha >= desde && fecha <= hasta;
@@ -36,7 +37,9 @@ export function calcularResumen({ turnos, ventas, egresos, guardados = [], desde
   for (const m of METODOS_PAGO) porMetodo[m] = redondear(porMetodo[m]);
 
   const totalVentas = redondear(METODOS_PAGO.reduce((s, m) => s + porMetodo[m], 0) + sube);
-  const totalEgresos = redondear(egresosDelRango.reduce((s, e) => s + (Number(e.monto) || 0), 0));
+  // Todos los egresos del período (de la caja y de la caja de guardado), por tipo y por origen.
+  const egresosTotales = totalizarEgresos(egresosDelRango);
+  const totalEgresos = egresosTotales.total;
   const totalGuardado = redondear(guardadosDelRango.reduce((s, g) => s + (Number(g.monto) || 0), 0));
 
   const filasTurnos = turnosFiltrados.map((t) => {
@@ -72,6 +75,7 @@ export function calcularResumen({ turnos, ventas, egresos, guardados = [], desde
     sube: redondear(sube),
     totalVentas,
     totalEgresos,
+    egresosTotales,
     totalGuardado,
     neto: redondear(totalVentas - totalEgresos),
     turnos: filasTurnos,

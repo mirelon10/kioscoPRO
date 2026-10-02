@@ -1,5 +1,5 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
-import { formatearMoneda } from "../lib/dinero.js";
+import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
 import { fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
 import { calcularCajaTurno } from "../core/caja.js";
@@ -9,7 +9,8 @@ import { obtenerMovimientos } from "../data/reportes.js";
 import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
 import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
-import { avisar, confirmar, conBoton, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
+import { avisar, confirmar, conBoton, formularioModal, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
+import { ajustarSaldoGuardado } from "../data/cajaGuardado.js";
 import { desgloseCierre } from "./desglose.js";
 
 const selectEmpleado = $("admin-empleado");
@@ -31,8 +32,12 @@ export function iniciarAdmin() {
     if (boton) conBoton(boton, () => cerrarTurnoDesdeAdmin(boton.dataset.cerrarTurno));
   });
 
+  const btnAjustar = $("btn-ajustar-saldo");
+  btnAjustar.addEventListener("click", () => conBoton(btnAjustar, ajustarSaldo));
+
   alCambiarSesion((_, cambios) => {
     if ("productos" in cambios) renderAlertasStock();
+    if ("saldoGuardado" in cambios) renderSaldoGuardado();
   });
 }
 
@@ -47,6 +52,7 @@ export function reiniciarAdmin() {
 
 export function abrirAdmin() {
   renderAlertasStock();
+  renderSaldoGuardado();
   cargarResumen();
 }
 
@@ -104,6 +110,9 @@ function renderResumen() {
   $("metric-sube").textContent = formatearMoneda(r.sube);
   $("metric-ventas").textContent = formatearMoneda(r.totalVentas);
   $("metric-egresos").textContent = formatearMoneda(r.totalEgresos);
+  $("metric-egresos-detalle").textContent =
+    `Fijos ${formatearMoneda(r.egresosTotales.fijos)} · Variables ${formatearMoneda(r.egresosTotales.variables)}` +
+    (r.egresosTotales.sinClasificar ? ` · Sin clasificar ${formatearMoneda(r.egresosTotales.sinClasificar)}` : "");
   $("metric-guardado").textContent = formatearMoneda(r.totalGuardado);
   $("metric-neto").textContent = formatearMoneda(r.neto);
 
@@ -151,6 +160,45 @@ function renderTurnos(filas) {
       );
     }),
   );
+}
+
+// ---------- Caja de guardado ----------
+
+function renderSaldoGuardado() {
+  $("admin-saldo-guardado").textContent = sesion.saldoGuardado == null ? "—" : formatearMoneda(sesion.saldoGuardado);
+}
+
+const FORMULARIO_AJUSTE_SALDO = `
+  <div class="swal-form">
+    <p id="ajuste-saldo-actual" class="text-muted"></p>
+    <label>Saldo real en la caja de guardado $<input id="ajuste-saldo-nuevo" type="number" min="0" step="0.01" class="swal2-input" inputmode="decimal"></label>
+    <label>Motivo<input id="ajuste-saldo-motivo" class="swal2-input" maxlength="200" placeholder="Ej: retiro del dueño, conteo de la caja"></label>
+  </div>`;
+
+/** El admin fija el saldo (conteo de la caja, retiro del dueño). Queda registrado con el motivo. */
+async function ajustarSaldo() {
+  const actual = sesion.saldoGuardado ?? 0;
+  const datos = await formularioModal({
+    titulo: "Ajustar saldo de la caja de guardado",
+    boton: "Guardar ajuste",
+    contenido: FORMULARIO_AJUSTE_SALDO,
+    alAbrir: (popup) => {
+      popup.querySelector("#ajuste-saldo-actual").textContent = `Saldo actual en el sistema: ${formatearMoneda(actual)}`;
+      popup.querySelector("#ajuste-saldo-nuevo").value = actual.toFixed(2);
+    },
+    leer: (popup) => {
+      const saldoNuevo = parsearMonto(popup.querySelector("#ajuste-saldo-nuevo").value);
+      const motivo = popup.querySelector("#ajuste-saldo-motivo").value.trim();
+      if (!(saldoNuevo >= 0)) return "Ingresá el saldo real (puede ser 0).";
+      if (!motivo) return "Indicá el motivo del ajuste.";
+      if (saldoNuevo === actual) return "El saldo ya es ese.";
+      return { saldoNuevo, motivo };
+    },
+  });
+  if (!datos) return;
+
+  await ajustarSaldoGuardado({ usuario: sesion.usuario, ...datos });
+  notificarExito(`Saldo de la caja de guardado: ${formatearMoneda(datos.saldoNuevo)}`);
 }
 
 // ---------- Exportar a Excel ----------

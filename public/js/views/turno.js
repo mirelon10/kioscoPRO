@@ -3,7 +3,7 @@ import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
 import { aDate, formatearFechaHora, horasDesde } from "../lib/fechas.js";
 import { calcularCajaTurno } from "../core/caja.js";
 import { abrirTurno, cerrarTurno } from "../data/turnos.js";
-import { registrarGuardado } from "../data/guardados.js";
+import { registrarGuardado } from "../data/cajaGuardado.js";
 import { sesion, alCambiarSesion } from "../estado.js";
 import { avisar, confirmar, conBoton, mostrarDetalle, notificarExito } from "../ui.js";
 import { desgloseCierre } from "./desglose.js";
@@ -31,6 +31,7 @@ export function iniciarTurno() {
 
   alCambiarSesion((_, cambios) => {
     if ("turno" in cambios || "movimientosTurno" in cambios) render();
+    if ("saldoGuardado" in cambios) renderSaldo();
   });
   render();
 }
@@ -71,6 +72,10 @@ function renderCaja(turno, movimientos) {
   botonCerrar.disabled = botonGuardar.disabled = false;
   contenedor.replaceChildren(desgloseCierre(cajaActual));
   renderGuardados(movimientos.guardados);
+}
+
+function renderSaldo() {
+  $("saldo-guardado-turno").textContent = sesion.saldoGuardado == null ? "—" : formatearMoneda(sesion.saldoGuardado);
 }
 
 function renderGuardados(guardados) {

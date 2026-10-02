@@ -2,6 +2,7 @@ import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from ".
 import { $, mostrar } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
+import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
 import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
 import { sesion, actualizarSesion, esAdmin } from "./estado.js";
 import { avisar, mostrarError } from "./ui.js";
@@ -37,7 +38,7 @@ onAuthStateChanged(auth, async (usuario) => {
   detenerListeners();
 
   if (!usuario) {
-    actualizarSesion({ usuario: null, rol: null, turno: null, movimientosTurno: null, productos: [] });
+    actualizarSesion({ usuario: null, rol: null, turno: null, movimientosTurno: null, productos: [], saldoGuardado: null });
     vaciarPos();
     return mostrarPantalla("login");
   }
@@ -116,6 +117,10 @@ function escucharDatos(uid, gen) {
 
   desuscribir.push(
     escucharProductos((productos) => vigente() && actualizarSesion({ productos }), alFallar("No se pudo cargar el catálogo.")),
+    escucharSaldoGuardado(
+      (saldoGuardado) => vigente() && actualizarSesion({ saldoGuardado }),
+      alFallar("No se pudo cargar el saldo de la caja de guardado."),
+    ),
   );
 
   // Mientras haya un turno abierto se escuchan sus ventas y egresos (caja calculada en vivo).

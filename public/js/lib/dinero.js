@@ -26,3 +26,11 @@ export function parsearMonto(valor) {
 export function calcularPrecioVenta(costo, margenPorcentaje) {
   return redondear((Number(costo) || 0) * (1 + (Number(margenPorcentaje) || 0) / 100));
 }
+
+/**
+ * Pesos a centavos enteros. El saldo de la caja de guardado se guarda en centavos para que
+ * las sumas y restas sean exactas (las reglas de Firestore usan la misma cuenta: math.round(monto * 100)).
+ */
+export function aCentavos(monto) {
+  return Math.round(Number(monto) * 100);
+}
