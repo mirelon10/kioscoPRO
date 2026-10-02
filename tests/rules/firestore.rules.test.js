@@ -389,30 +389,98 @@ describe("egresos", () => {
 });
 
 describe("caja de guardado", () => {
-  test("el empleado guarda efectivo durante su turno abierto", async () => {
+  const SALDO = "cajaGuardado/saldo";
+  const saldo = (centavos, movColeccion, movId) => ({ saldoCentavos: centavos, movColeccion, movId, actualizado: serverTimestamp() });
+
+  /** Como la app: el movimiento y el saldo en el mismo batch. */
+  function conSaldo(fs, ruta, datos, saldoCentavos) {
+    const [coleccion, id] = ruta.split("/");
+    const batch = writeBatch(fs);
+    batch.set(doc(fs, ruta), datos);
+    batch.set(doc(fs, SALDO), saldo(saldoCentavos, coleccion, id));
+    return batch.commit();
+  }
+  const egresoGuardado = (uid, extra = {}) => egreso(uid, { tipo: "fijo", origen: "guardado", monto: 2000, motivo: "Alquiler", ...extra });
+
+  test("guardar efectivo suma al saldo en la misma transacción", async () => {
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    await assertSucceeds(addDoc(collection(fs, "guardados"), guardado(ANA)));
+    await assertSucceeds(conSaldo(fs, "guardados/g1", guardado(ANA), 500000));
+    await assertSucceeds(conSaldo(fs, "guardados/g2", guardado(ANA, { monto: 100.1 }), 510010));
+    await assertSucceeds(getDoc(doc(comoBeto(), SALDO))); // todo el personal ve el saldo
+    await assertFails(getDoc(doc(sinRol(), SALDO)));
+  });
+
+  test("un guardado sin mover el saldo, con un monto distinto o repetido se rechaza", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await assertFails(setDoc(doc(fs, "guardados/g1"), guardado(ANA)));
+    await assertFails(conSaldo(fs, "guardados/g1", guardado(ANA), 999999));
+    await assertSucceeds(conSaldo(fs, "guardados/g1", guardado(ANA), 500000));
+    // Volver a usar un guardado que ya existía para inflar el saldo.
+    await assertFails(setDoc(doc(fs, SALDO), saldo(1000000, "guardados", "g1")));
+    await assertFails(setDoc(doc(fs, SALDO), saldo(0, "egresos", "inventado")));
+    await assertFails(deleteDoc(doc(fs, SALDO)));
   });
 
   test("rechaza guardados inválidos, ajenos, sin turno o con el turno cerrado", async () => {
-    await assertFails(addDoc(collection(comoAna(), "guardados"), guardado(ANA)));
+    await assertFails(conSaldo(comoAna(), "guardados/g0", guardado(ANA), 500000));
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    const guardados = collection(fs, "guardados");
-    await assertFails(addDoc(guardados, guardado(ANA, { monto: 0 })));
-    await assertFails(addDoc(guardados, guardado(ANA, { monto: "mucho" })));
-    await assertFails(addDoc(guardados, guardado(ANA, { empleadoId: BETO })));
-    await assertFails(addDoc(guardados, guardado(ANA, { nota: "extra" })));
-    await assertFails(addDoc(guardados, guardado(ANA, { fecha: new Date(2020, 0, 1) })));
+    await assertFails(conSaldo(fs, "guardados/g1", guardado(ANA, { monto: 0 }), 0));
+    await assertFails(conSaldo(fs, "guardados/g2", guardado(ANA, { empleadoId: BETO }), 500000));
+    await assertFails(conSaldo(fs, "guardados/g3", guardado(ANA, { nota: "extra" }), 500000));
     await cerrarTurno(fs, ANA, ANA);
-    await assertFails(addDoc(guardados, guardado(ANA)));
+    await assertFails(conSaldo(fs, "guardados/g4", guardado(ANA), 500000));
+  });
+
+  test("pagar un egreso con la caja de guardado descuenta el saldo y nunca lo deja negativo", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await conSaldo(fs, "guardados/g1", guardado(ANA), 500000); // $5.000
+    await assertSucceeds(conSaldo(fs, "egresos/e1", egresoGuardado(ANA), 300000)); // − $2.000
+    await assertFails(conSaldo(fs, "egresos/e2", egresoGuardado(ANA, { monto: 4000 }), -100000)); // no alcanza
+    await assertFails(conSaldo(fs, "egresos/e3", egresoGuardado(ANA), 300000)); // no descuenta
+    await assertFails(setDoc(doc(fs, "egresos/e4"), egresoGuardado(ANA))); // sin tocar el saldo
+    await assertSucceeds(conSaldo(fs, "egresos/e5", egresoGuardado(ANA, { monto: 3000 }), 0)); // vacía la caja
+  });
+
+  test("egresos clasificados como costo fijo o variable", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    const egresos = collection(fs, "egresos");
+    await assertSucceeds(addDoc(egresos, egreso(ANA, { tipo: "variable", origen: "caja" })));
+    await assertSucceeds(addDoc(egresos, egreso(ANA, { tipo: "fijo" })));
+    await assertSucceeds(addDoc(egresos, egreso(ANA))); // formato anterior
+    await assertFails(addDoc(egresos, egreso(ANA, { tipo: "otro" })));
+    await assertFails(addDoc(egresos, egreso(ANA, { origen: "banco" })));
+  });
+
+  test("solo el admin ajusta el saldo, y queda registrado con el saldo anterior real", async () => {
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+    await conSaldo(fs, "guardados/g1", guardado(ANA), 500000);
+
+    const ajuste = (uid, anterior, nuevo) => ({
+      saldoAnteriorCentavos: anterior,
+      saldoNuevoCentavos: nuevo,
+      motivo: "Retiro del dueño",
+      adminId: uid,
+      adminNombre: `${uid}@kiosco.test`,
+      fecha: serverTimestamp(),
+    });
+    await assertFails(conSaldo(comoAna(), "ajustesGuardado/a1", ajuste(ANA, 500000, 0), 0));
+    await assertFails(conSaldo(comoAdmin(), "ajustesGuardado/a2", ajuste(ADMIN, 123, 0), 0)); // anterior falso
+    await assertSucceeds(conSaldo(comoAdmin(), "ajustesGuardado/a3", ajuste(ADMIN, 500000, 100000), 100000));
+    await assertSucceeds(getDoc(doc(comoAdmin(), "ajustesGuardado/a3")));
+    await assertFails(getDoc(doc(comoAna(), "ajustesGuardado/a3")));
   });
 
   test("los guardados son inmutables y cada empleado ve solo los suyos", async () => {
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    const ref = await addDoc(collection(fs, "guardados"), guardado(ANA));
+    await conSaldo(fs, "guardados/g1", guardado(ANA), 500000);
+    const ref = doc(fs, "guardados/g1");
     await assertFails(updateDoc(ref, { monto: 1 }));
     await assertFails(deleteDoc(ref));
     const guardados = collection(fs, "guardados");

@@ -6,6 +6,7 @@ export const sesion = {
   turno: null, // turno abierto del usuario o null
   movimientosTurno: null, // { ventas, egresos } del turno abierto, en tiempo real
   productos: [], // catálogo en tiempo real
+  saldoGuardado: null, // saldo de la caja de guardado en pesos, en tiempo real (null mientras carga)
 };
 
 const suscriptores = new Set();

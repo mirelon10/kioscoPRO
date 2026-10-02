@@ -164,12 +164,19 @@ service cloud.firestore {
     }
 
     // ---------- Egresos (inmutables) ----------
+    // tipo: costo "fijo" o "variable". origen: se pagó con la "caja" del turno o con la caja de "guardado".
+    // Son opcionales para seguir aceptando el formato anterior (sin clasificar, pagado con la caja).
+    // Pagado con la caja de guardado, el egreso tiene que descontar el saldo en la misma transacción.
 
     match /egresos/{egresoId} {
       allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
 
       allow create: if esPersonal()
-        && tieneExactamente(['turnoId', 'empleadoId', 'empleadoNombre', 'monto', 'motivo', 'fecha'])
+        && nuevo().keys().hasAll(['turnoId', 'empleadoId', 'empleadoNombre', 'monto', 'motivo', 'fecha'])
+        && nuevo().keys().hasOnly(['turnoId', 'empleadoId', 'empleadoNombre', 'monto', 'motivo', 'fecha', 'tipo', 'origen'])
+        && nuevo().get('tipo', 'fijo') in ['fijo', 'variable']
+        && nuevo().get('origen', 'caja') in ['caja', 'guardado']
+        && (nuevo().get('origen', 'caja') == 'caja' || saldoMovidoPor('egresos', egresoId))
         && nuevo().empleadoId == uid()
         && esTexto(nuevo().empleadoNombre, 200)
         && esMonto(nuevo().monto) && nuevo().monto > 0
@@ -181,8 +188,63 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ---------- Caja de guardado (inmutable) ----------
-    // Efectivo que el empleado pasa de la caja a la caja de guardado durante su turno.
+    // ---------- Caja de guardado ----------
+    // guardados: efectivo que el empleado pasa del cajón a la caja de guardado durante su turno.
+    // cajaGuardado/saldo: saldo acumulado entre turnos, en centavos (enteros: sumas exactas).
+    // Cada cambio del saldo va en la misma transacción que el movimiento que lo explica, y las reglas
+    // verifican que cambie exactamente en ese monto, que el movimiento sea nuevo y que nunca quede negativo.
+
+    function saldoGuardado() { return /databases/$(database)/documents/cajaGuardado/saldo; }
+    function movimientoGuardado(coleccion, id) { return /databases/$(database)/documents/$(coleccion)/$(id); }
+    function saldoMovidoPor(coleccion, id) {
+      let saldo = getAfter(saldoGuardado()).data;
+      return saldo.movColeccion == coleccion && saldo.movId == id;
+    }
+    function saldoExplicado(anterior) {
+      let coleccion = nuevo().movColeccion;
+      let mov = getAfter(movimientoGuardado(coleccion, nuevo().movId)).data;
+      return (coleccion == 'guardados' && esPersonal()
+          && nuevo().saldoCentavos == anterior + math.round(mov.monto * 100))
+        || (coleccion == 'egresos' && esPersonal() && mov.origen == 'guardado'
+          && nuevo().saldoCentavos == anterior - math.round(mov.monto * 100))
+        || (coleccion == 'ajustesGuardado' && esAdmin()
+          && mov.saldoAnteriorCentavos == anterior && nuevo().saldoCentavos == mov.saldoNuevoCentavos);
+    }
+
+    match /cajaGuardado/{docId} {
+      allow read: if esPersonal();
+
+      allow create, update: if docId == 'saldo'
+        && tieneExactamente(['saldoCentavos', 'movColeccion', 'movId', 'actualizado'])
+        && nuevo().saldoCentavos is int
+        && nuevo().saldoCentavos >= 0
+        && nuevo().saldoCentavos <= 10000000000
+        && nuevo().actualizado == request.time
+        && nuevo().movColeccion in ['guardados', 'egresos', 'ajustesGuardado']
+        && nuevo().movId is string
+        && !exists(movimientoGuardado(nuevo().movColeccion, nuevo().movId))
+        && saldoExplicado(resource == null ? 0 : resource.data.saldoCentavos);
+
+      allow delete: if false;
+    }
+
+    // Ajustes del saldo por el admin (conteo de la caja, retiro del dueño). Quedan registrados.
+    match /ajustesGuardado/{ajusteId} {
+      allow read: if esAdmin();
+
+      allow create: if esAdmin()
+        && tieneExactamente(['saldoAnteriorCentavos', 'saldoNuevoCentavos', 'motivo', 'adminId', 'adminNombre', 'fecha'])
+        && nuevo().saldoAnteriorCentavos is int
+        && nuevo().saldoNuevoCentavos is int
+        && nuevo().saldoNuevoCentavos >= 0
+        && esTexto(nuevo().motivo, 200)
+        && nuevo().adminId == uid()
+        && esTexto(nuevo().adminNombre, 200)
+        && nuevo().fecha == request.time
+        && saldoMovidoPor('ajustesGuardado', ajusteId);
+
+      allow update, delete: if false;
+    }
 
     match /guardados/{guardadoId} {
       allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
@@ -194,7 +256,8 @@ service cloud.firestore {
         && esMonto(nuevo().monto) && nuevo().monto > 0
         && nuevo().fecha == request.time
         && nuevo().turnoId is string
-        && turnoAbiertoPropio(nuevo().turnoId);
+        && turnoAbiertoPropio(nuevo().turnoId)
+        && saldoMovidoPor('guardados', guardadoId);
 
       allow update, delete: if false;
     }

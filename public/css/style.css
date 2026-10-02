@@ -257,3 +257,19 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 #caja-guardado h3 { color: var(--dark); margin-bottom: 4px; }
 #caja-guardado .table-modern th, #caja-guardado .table-modern td { padding: 10px 15px; }
 #caja-guardado { margin-top: 1.5rem; }
+
+/* === EGRESOS: TIPO Y ORIGEN; SALDO DE LA CAJA DE GUARDADO === */
+.form-egreso { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 15px; align-items: center; }
+.egreso-botones { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.egreso-botones .text-muted { margin-left: auto; }
+.badge-fijo { background: #e0e7ff; color: #3730a3; }
+.badge-variable { background: #fef3c7; color: #92400e; }
+.badge-sin-tipo { background: #f1f5f9; color: var(--text-muted); }
+.total-detalle { text-align: right; margin-top: 4px; font-size: 0.85rem; }
+.stat-detalle { margin-top: 6px; font-size: 0.8rem; color: var(--text-muted); }
+.saldo-guardado { color: #0369a1; }
+.saldo-guardado-card { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; border-left: 5px solid #0284c7; }
+.saldo-guardado-card > div { flex: 1; min-width: 220px; }
+.saldo-guardado-card h4 { color: var(--dark); margin-bottom: 4px; }
+.saldo-monto { font-size: 1.8rem; color: var(--dark); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .form-egreso { grid-template-columns: 1fr; } .egreso-botones .text-muted { margin-left: 0; } }

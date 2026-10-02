@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { redondear, parsearMonto, calcularPrecioVenta } from "../../public/js/lib/dinero.js";
+import { redondear, parsearMonto, calcularPrecioVenta, aCentavos } from "../../public/js/lib/dinero.js";
 import { fechaLocalISO, inicioDelDia, finDelDia, aDate } from "../../public/js/lib/fechas.js";
 import { armarVenta, normalizarVenta } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
@@ -9,6 +9,7 @@ import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencia
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
 import { calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
+import { normalizarEgreso, totalizarEgresos, etiquetaTipoEgreso } from "../../public/js/core/egresos.js";
 
 describe("dinero", () => {
   test("redondea a centavos sin errores de punto flotante", () => {
@@ -272,6 +273,7 @@ describe("armarExcelResumen", () => {
     sube: 500,
     totalVentas: 3100,
     totalEgresos: 301,
+    egresosTotales: { total: 301, fijos: 200, variables: 101, sinClasificar: 0, desdeCaja: 301, desdeGuardado: 0 },
     totalGuardado: 200,
     neto: 2799,
     turnos: [
@@ -293,6 +295,62 @@ describe("armarExcelResumen", () => {
     assert.deepEqual(res.filas[2], ["Empleado", "ana@k.com"]);
     assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2100, 500, 0, 500, 3100, 301, 200, 1599, "admin@k.com"]);
     assert.deepEqual(turnos.filas[2].slice(2, 4), ["", "Abierto"]);
-    assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", 301]);
+    assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", "Sin clasificar", "Caja", 301]);
+    assert.deepEqual(res.filas.find((f) => f[0] === "  Costos variables"), ["  Costos variables", 101]);
+  });
+});
+
+describe("egresos: tipo y origen", () => {
+  const lista = [
+    { monto: 1000, tipo: "fijo", origen: "caja" },
+    { monto: "250.5", tipo: "variable", origen: "guardado" },
+    { monto: 100 }, // formato anterior: sin clasificar, pagado con la caja
+  ];
+
+  test("normaliza egresos viejos: sin clasificar y pagados con la caja", () => {
+    const e = normalizarEgreso({ monto: "100", motivo: "x" });
+    assert.equal(e.tipo, null);
+    assert.equal(e.origen, "caja");
+    assert.equal(e.monto, 100);
+    assert.equal(etiquetaTipoEgreso(e.tipo), "Sin clasificar");
+    assert.equal(etiquetaTipoEgreso("fijo"), "Costo fijo");
+  });
+
+  test("totaliza por tipo y por origen", () => {
+    assert.deepEqual(totalizarEgresos(lista), {
+      total: 1350.5,
+      fijos: 1000,
+      variables: 250.5,
+      sinClasificar: 100,
+      desdeCaja: 1100,
+      desdeGuardado: 250.5,
+    });
+  });
+
+  test("lo pagado con la caja de guardado no se resta del cierre del turno", () => {
+    const caja = calcularCajaTurno({ cajaInicial: 1000, ventas: [{ metodoPago: "Efectivo", total: 3000 }], egresos: lista });
+    assert.equal(caja.egresos, 1100);
+    assert.equal(caja.total, 900); // 3000 − 1000 − 1100
+    assert.equal(caja.efectivoEnCaja, 2900); // 1000 + 3000 − 1100
+  });
+
+  test("el resumen del admin suma todos los egresos del período, con su detalle", () => {
+    const ts = { toDate: () => new Date(2026, 9, 1, 12) };
+    const r = calcularResumen({
+      turnos: [],
+      ventas: [],
+      egresos: lista.map((e) => ({ ...e, fecha: ts })),
+      desde: new Date(2026, 9, 1),
+      hasta: new Date(2026, 9, 1, 23, 59),
+    });
+    assert.equal(r.totalEgresos, 1350.5);
+    assert.equal(r.egresosTotales.desdeGuardado, 250.5);
+    assert.equal(r.egresosTotales.fijos, 1000);
+  });
+
+  test("pasa a centavos enteros sin errores de punto flotante", () => {
+    assert.equal(aCentavos(0.29), 29);
+    assert.equal(aCentavos(1234.56), 123456);
+    assert.equal(aCentavos(0.1 + 0.2), 30);
   });
 });

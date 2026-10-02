@@ -1,5 +1,6 @@
 import { redondear } from "../lib/dinero.js";
 import { METODOS_PAGO, normalizarVenta } from "./ventas.js";
+import { normalizarEgreso } from "./egresos.js";
 
 const sumar = (lista, campo) => redondear(lista.reduce((s, x) => s + (Number(x[campo]) || 0), 0));
 
@@ -10,6 +11,7 @@ const sumar = (lista, campo) => redondear(lista.reduce((s, x) => s + (Number(x[c
  *   − caja inicial − egresos − caja de guardado = total
  *
  * Las recargas SUBE van en su propia línea: no se suman de nuevo en el método con que se cobraron.
+ * Solo cuentan los egresos pagados con la caja: los pagados con la caja de guardado no salen del cajón.
  *
  * `efectivoEnCaja` es la plata física que debería quedar en el cajón (caja inicial + todo lo cobrado
  * en efectivo, SUBE incluida, − egresos − guardado). No se muestra: sirve para no guardar más plata
@@ -32,7 +34,7 @@ export function calcularCajaTurno({ cajaInicial, ventas, egresos, guardados = []
 
   const inicial = Number(cajaInicial) || 0;
   const totalVentas = redondear(METODOS_PAGO.reduce((s, m) => s + porMetodo[m], 0) + sube);
-  const totalEgresos = sumar(egresos, "monto");
+  const totalEgresos = sumar(egresos.map(normalizarEgreso).filter((e) => e.origen === "caja"), "monto");
   const guardado = sumar(guardados, "monto");
 
   return {

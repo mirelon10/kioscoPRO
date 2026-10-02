@@ -173,7 +173,8 @@
             <tbody id="tabla-guardados"></tbody>
           </table>
         </div>
-        <p class="total-tabla">Total guardado: <span id="total-guardado">$ 0,00</span></p>
+        <p class="total-tabla">Guardado en este turno: <span id="total-guardado">$ 0,00</span></p>
+        <p class="total-tabla saldo-guardado">Saldo en caja de guardado: <span id="saldo-guardado-turno">—</span></p>
       </div>
     </section>
 
@@ -181,12 +182,22 @@
     <section id="sec-egresos" class="view-section hidden" aria-labelledby="titulo-egresos">
       <div class="section-header"><h2 id="titulo-egresos">Registro e historial de egresos</h2></div>
       <div class="card mb-4">
-        <form id="form-egreso" class="form-inline" novalidate>
+        <form id="form-egreso" class="form-egreso" novalidate>
           <label for="egreso-motivo" class="sr-only">Motivo</label>
           <input type="text" id="egreso-motivo" placeholder="Motivo (ej: pago a proveedor)" class="input-modern" maxlength="200" required>
           <label for="egreso-monto" class="sr-only">Monto</label>
           <input type="number" id="egreso-monto" placeholder="Monto $" min="0.01" step="0.01" class="input-modern" inputmode="decimal" required>
-          <button type="submit" class="btn btn-warning"><i class="fa-solid fa-minus" aria-hidden="true"></i> Descontar de caja</button>
+          <label for="egreso-tipo" class="sr-only">Tipo de costo</label>
+          <select id="egreso-tipo" class="input-modern" required>
+            <option value="" selected disabled>Tipo de costo…</option>
+            <option value="fijo">Costo fijo</option>
+            <option value="variable">Costo variable</option>
+          </select>
+          <div class="egreso-botones">
+            <button type="submit" class="btn btn-warning" data-origen="caja"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> Pagar con la caja</button>
+            <button type="submit" class="btn btn-primary" data-origen="guardado"><i class="fa-solid fa-piggy-bank" aria-hidden="true"></i> Pagar con caja de guardado</button>
+            <span class="text-muted">Saldo en caja de guardado: <strong id="egreso-saldo-guardado">—</strong></span>
+          </div>
         </form>
       </div>
       <!-- Egresos del turno abierto (cualquier usuario con turno) -->
@@ -194,11 +205,12 @@
         <h4 class="mb-3">Egresos de tu turno</h4>
         <div class="tabla-scroll">
           <table class="table-modern">
-            <thead><tr><th>Hora</th><th>Motivo</th><th class="num">Monto</th></tr></thead>
+            <thead><tr><th>Hora</th><th>Motivo</th><th>Tipo</th><th>Pagado con</th><th class="num">Monto</th></tr></thead>
             <tbody id="tabla-egresos-turno"></tbody>
           </table>
         </div>
         <p class="total-tabla">Total: <span id="total-egresos-turno">$ 0,00</span></p>
+        <p id="detalle-egresos-turno" class="total-detalle text-muted"></p>
       </div>
 
       <!-- Historial por fecha: solo administradores -->
@@ -213,11 +225,12 @@
         </form>
         <div class="tabla-scroll">
           <table class="table-modern">
-            <thead><tr><th>Fecha / hora</th><th>Empleado</th><th>Motivo</th><th class="num">Monto</th></tr></thead>
+            <thead><tr><th>Fecha / hora</th><th>Empleado</th><th>Motivo</th><th>Tipo</th><th>Pagado con</th><th class="num">Monto</th></tr></thead>
             <tbody id="tabla-egresos-body"></tbody>
           </table>
         </div>
         <p class="total-tabla">Total: <span id="total-egresos-lista">$ 0,00</span></p>
+        <p id="detalle-egresos-lista" class="total-detalle text-muted"></p>
       </div>
     </section>
 
@@ -287,9 +300,18 @@
         </div>
         <div class="stats-grid mb-4">
           <div class="stat-card"><h5>Total ventas <small>(métodos + SUBE)</small></h5><h3 id="metric-ventas">$ 0,00</h3></div>
-          <div class="stat-card danger"><h5>Total egresos</h5><h3 id="metric-egresos">$ 0,00</h3></div>
-          <div class="stat-card info"><h5>Caja de guardado</h5><h3 id="metric-guardado">$ 0,00</h3></div>
+          <div class="stat-card danger"><h5>Total egresos</h5><h3 id="metric-egresos">$ 0,00</h3><p id="metric-egresos-detalle" class="stat-detalle"></p></div>
+          <div class="stat-card info"><h5>Guardado en el período</h5><h3 id="metric-guardado">$ 0,00</h3></div>
           <div class="stat-card success"><h5>Neto (ventas − egresos)</h5><h3 id="metric-neto">$ 0,00</h3></div>
+        </div>
+
+        <div class="card mb-4 saldo-guardado-card">
+          <div>
+            <h4><i class="fa-solid fa-piggy-bank" aria-hidden="true"></i> Caja de guardado</h4>
+            <p class="text-muted">Saldo acumulado: lo guardado en los turnos menos lo pagado con la caja de guardado y los ajustes.</p>
+          </div>
+          <strong id="admin-saldo-guardado" class="saldo-monto">—</strong>
+          <button type="button" id="btn-ajustar-saldo" class="btn btn-secondary"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i> Ajustar saldo</button>
         </div>
 
         <div class="card">
