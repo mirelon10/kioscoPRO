@@ -160,6 +160,13 @@ sirven desde la copia. Si el token de la sesión ya venció (dura 1 hora), se us
 equipo; los permisos igual los imponen las reglas al subir. Al agregar un archivo a `public/` hay que sumarlo
 a `ARCHIVOS_APP` en `sw.js`: `tests/unit/sw.test.js` falla si falta.
 
+**Cerrar sesión en una PC compartida** ([`firebase.js`](public/js/firebase.js)): al salir se borra la copia
+local de Firestore (catálogo, ventas, turnos, egresos) y el rol recordado, y la página se recarga, así no
+quedan en el navegador los datos de quien salió. Nunca se borran movimientos sin subir: antes de salir se
+cuentan los de **todas** las pestañas leyendo el almacén `mutations` de la base IndexedDB de Firestore
+(`waitForPendingWrites` solo ve los de la pestaña actual). Son nombres internos del SDK: al actualizarlo,
+verificar que sigan iguales. Si el borrado falla, se reintenta la próxima vez que se abra la app sin sesión.
+
 ## Modelo de datos
 
 | Colección | Documento | Quién escribe |

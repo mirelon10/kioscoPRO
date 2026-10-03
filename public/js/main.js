@@ -1,4 +1,12 @@
-import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "./firebase.js";
+import {
+  auth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  borrarDatosLocales,
+  hayBorradoPendiente,
+  contarEscriturasSinSubir,
+} from "./firebase.js";
 import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
@@ -56,6 +64,8 @@ onAuthStateChanged(auth, async (usuario) => {
   detenerListeners();
 
   if (!usuario) {
+    // Un cierre de sesión anterior no pudo borrar los datos locales: se reintenta una vez por pestaña.
+    if (hayBorradoPendiente() && !reintentoDeBorradoHecho()) return borrarDatosLocales();
     actualizarSesion({ usuario: null, rol: null, turno: null, movimientosTurno: null, productos: [], saldoGuardado: null });
     vaciarPos();
     return mostrarPantalla("login");
@@ -116,6 +126,14 @@ function recordarRol(uid, rol) {
   }
 }
 
+function olvidarRol(uid) {
+  try {
+    localStorage.removeItem(claveRol(uid));
+  } catch {
+    // almacenamiento bloqueado
+  }
+}
+
 function rolRecordado(uid) {
   try {
     return localStorage.getItem(claveRol(uid));
@@ -153,14 +171,32 @@ async function cerrarSesion() {
     avisar("Turno abierto", "Cerrá tu turno en 'Caja y turnos' antes de salir del sistema.");
     return irA("sec-turnos");
   }
-  if (haySincronizacionPendiente()) {
+  // El indicador solo sigue lo escrito desde esta pestaña: también se cuentan las escrituras sin
+  // subir de otras pestañas, que se perderían al borrar los datos locales.
+  if (haySincronizacionPendiente() || (await contarEscriturasSinSubir()) > 0) {
     avisar("Hay movimientos sin subir", "Esperá a que vuelva internet y se suban antes de salir del sistema.");
     return;
   }
+
+  const { uid } = sesion.usuario;
   try {
     await signOut(auth);
   } catch (error) {
-    mostrarError(error);
+    return mostrarError(error);
+  }
+  // PC compartida: que no queden en el navegador los datos de quien salió.
+  olvidarRol(uid);
+  await borrarDatosLocales();
+}
+
+/** Marca (en esta pestaña) que ya se reintentó el borrado, para no recargar en bucle si vuelve a fallar. */
+function reintentoDeBorradoHecho() {
+  try {
+    if (sessionStorage.getItem("kiosco.reintentoBorrado")) return true;
+    sessionStorage.setItem("kiosco.reintentoBorrado", "1");
+    return false;
+  } catch {
+    return true;
   }
 }
 
