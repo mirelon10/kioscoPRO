@@ -17,6 +17,17 @@ const toast = Swal.mixin({
 });
 
 export const notificarExito = (titulo) => toast.fire({ icon: "success", titleText: titulo });
+
+/** Éxito de una escritura: si quedó pendiente (sin conexión), lo aclara. */
+export const notificarRegistro = (titulo, pendiente) =>
+  pendiente
+    ? toast.fire({
+        icon: "info",
+        titleText: titulo,
+        text: "Sin conexión: quedó guardado en este equipo y se sube solo cuando vuelva internet.",
+        timer: 4500,
+      })
+    : notificarExito(titulo);
 export const avisar = (titulo, texto) => Swal.fire({ icon: "warning", titleText: titulo, text: texto });
 
 export function mostrarError(error, porDefecto) {

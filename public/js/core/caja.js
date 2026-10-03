@@ -1,5 +1,6 @@
-import { redondear } from "../lib/dinero.js";
-import { METODOS_PAGO, normalizarVenta } from "./ventas.js";
+import { formatearMoneda, redondear } from "../lib/dinero.js";
+import { METODOS_PAGO, armarVenta, normalizarVenta } from "./ventas.js";
+import { ErrorNegocio } from "./errores.js";
 import { normalizarEgreso } from "./egresos.js";
 
 const sumar = (lista, campo) => redondear(lista.reduce((s, x) => s + (Number(x[campo]) || 0), 0));
@@ -56,4 +57,24 @@ export function calcularVuelto(total, montoRecibido) {
   if (!Number.isFinite(recibido)) return { vuelto: null, falta: null };
   const diferencia = redondear(recibido - total);
   return diferencia >= 0 ? { vuelto: diferencia, falta: 0 } : { vuelto: null, falta: -diferencia };
+}
+
+/**
+ * Arma la venta (armarVenta) y verifica el pago. En efectivo, `montoRecibido` es obligatorio
+ * y tiene que cubrir el total real, que puede diferir del carrito en pantalla.
+ *
+ * @returns {{ lineas: object[], total: number, nuevosStocks: number[], vuelto: number|null }}
+ */
+export function armarCobro(carrito, productos, metodoPago, montoRecibido) {
+  const venta = armarVenta(carrito, productos);
+  if (metodoPago !== "Efectivo") return { ...venta, vuelto: null };
+
+  const pago = calcularVuelto(venta.total, montoRecibido);
+  if (pago.vuelto === null) {
+    throw new ErrorNegocio(
+      `El pago no alcanza: el total es ${formatearMoneda(venta.total)}` +
+        (pago.falta ? ` y faltan ${formatearMoneda(pago.falta)}.` : "."),
+    );
+  }
+  return { ...venta, vuelto: pago.vuelto };
 }

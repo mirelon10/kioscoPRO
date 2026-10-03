@@ -164,6 +164,8 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 /* Sidebar */
 .estado-turno { font-size: 0.85rem; color: #fca5a5; margin-bottom: 12px; }
 .estado-turno.abierto { color: #86efac; }
+.estado-conexion { font-size: 0.85rem; color: #fcd34d; margin-bottom: 8px; }
+.estado-conexion.sincronizando { color: #93c5fd; }
 .user-rol { display: block; color: #94a3b8; font-size: 0.8rem; }
 
 /* POS */
@@ -284,6 +286,7 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
   .sidebar-brand { grid-area: marca; margin: 0; font-size: 1.2rem; }
   .sidebar-footer { grid-area: pie; border-top: none; padding: 0; display: flex; align-items: center; gap: 10px; }
   .sidebar-footer .estado-turno { margin: 0; font-size: 0.8rem; white-space: nowrap; }
+  .sidebar-footer .estado-conexion { margin: 0; font-size: 0.8rem; }
   .sidebar-footer .user-info { display: none; }
   .sidebar-footer .btn-block { width: auto; padding: 8px 12px; font-size: 0.9rem; }
   .sidebar-nav { grid-area: menu; flex-direction: row; flex-wrap: wrap; gap: 6px; }

@@ -1,11 +1,27 @@
-import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "./firebase.js";
+import {
+  auth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  borrarDatosLocales,
+  hayBorradoPendiente,
+  contarEscriturasSinSubir,
+} from "./firebase.js";
 import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { escucharProductos } from "./data/productos.js";
 import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
 import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
+import {
+  alCambiarConexion,
+  alProblemaDeSincronizacion,
+  estaOnline,
+  haySincronizacionPendiente,
+  revisarPendientesAlIniciar,
+} from "./data/conexion.js";
 import { sesion, actualizarSesion, esAdmin } from "./estado.js";
 import { avisar, mostrarError } from "./ui.js";
+import { conLimiteDeTiempo } from "./lib/espera.js";
 import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
 import { iniciarTurno } from "./views/turno.js";
 import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/egresos.js";
@@ -34,11 +50,22 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 $("form-login").addEventListener("submit", iniciarSesion);
 $("btn-logout").addEventListener("click", cerrarSesion);
 
+alCambiarConexion(renderConexion);
+
+// Guarda la app en el dispositivo para poder abrirla sin internet (ver sw.js).
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch((error) => console.warn("No se pudo activar el modo sin conexión", error));
+}
+// Ventas o egresos hechos sin conexión que el servidor rechazó al subirlos.
+alProblemaDeSincronizacion(({ titulo, texto }) => avisar(titulo, texto));
+
 onAuthStateChanged(auth, async (usuario) => {
   const gen = ++generacion;
   detenerListeners();
 
   if (!usuario) {
+    // Un cierre de sesión anterior no pudo borrar los datos locales: se reintenta una vez por pestaña.
+    if (hayBorradoPendiente() && !reintentoDeBorradoHecho()) return borrarDatosLocales();
     actualizarSesion({ usuario: null, rol: null, turno: null, movimientosTurno: null, productos: [], saldoGuardado: null });
     vaciarPos();
     return mostrarPantalla("login");
@@ -66,13 +93,52 @@ onAuthStateChanged(auth, async (usuario) => {
 
 // ---------- Sesión ----------
 
-/** Lee el rol (custom claim). Fuerza la renovación del token para tomar roles recién asignados. */
+const ESPERA_TOKEN_MS = 5000;
+const claveRol = (uid) => `kiosco.rol.${uid}`;
+
+/**
+ * Lee el rol (custom claim). Fuerza la renovación del token para tomar roles recién asignados.
+ * Sin internet usa el token en caché y, si ya venció (dura 1 hora), el último rol conocido en
+ * este equipo. El rol solo decide qué pantallas se ven: los permisos los imponen las reglas.
+ */
 async function leerRol(usuario) {
   try {
-    return (await usuario.getIdTokenResult(true)).claims.rol;
+    const rol = (await conLimiteDeTiempo(usuario.getIdTokenResult(true), ESPERA_TOKEN_MS)).claims.rol;
+    recordarRol(usuario.uid, rol);
+    return rol;
+  } catch (error) {
+    try {
+      return (await conLimiteDeTiempo(usuario.getIdTokenResult(), ESPERA_TOKEN_MS)).claims.rol;
+    } catch {
+      const rol = rolRecordado(usuario.uid);
+      if (rol) return rol;
+      throw error;
+    }
+  }
+}
+
+function recordarRol(uid, rol) {
+  try {
+    if (rol) localStorage.setItem(claveRol(uid), rol);
+    else localStorage.removeItem(claveRol(uid));
   } catch {
-    // Sin internet: usar el token en caché.
-    return (await usuario.getIdTokenResult()).claims.rol;
+    // almacenamiento bloqueado: sin conexión habrá que esperar a tener internet
+  }
+}
+
+function olvidarRol(uid) {
+  try {
+    localStorage.removeItem(claveRol(uid));
+  } catch {
+    // almacenamiento bloqueado
+  }
+}
+
+function rolRecordado(uid) {
+  try {
+    return localStorage.getItem(claveRol(uid));
+  } catch {
+    return null;
   }
 }
 
@@ -105,15 +171,38 @@ async function cerrarSesion() {
     avisar("Turno abierto", "Cerrá tu turno en 'Caja y turnos' antes de salir del sistema.");
     return irA("sec-turnos");
   }
+  // El indicador solo sigue lo escrito desde esta pestaña: también se cuentan las escrituras sin
+  // subir de otras pestañas, que se perderían al borrar los datos locales.
+  if (haySincronizacionPendiente() || (await contarEscriturasSinSubir()) > 0) {
+    avisar("Hay movimientos sin subir", "Esperá a que vuelva internet y se suban antes de salir del sistema.");
+    return;
+  }
+
+  const { uid } = sesion.usuario;
   try {
     await signOut(auth);
   } catch (error) {
-    mostrarError(error);
+    return mostrarError(error);
+  }
+  // PC compartida: que no queden en el navegador los datos de quien salió.
+  olvidarRol(uid);
+  await borrarDatosLocales();
+}
+
+/** Marca (en esta pestaña) que ya se reintentó el borrado, para no recargar en bucle si vuelve a fallar. */
+function reintentoDeBorradoHecho() {
+  try {
+    if (sessionStorage.getItem("kiosco.reintentoBorrado")) return true;
+    sessionStorage.setItem("kiosco.reintentoBorrado", "1");
+    return false;
+  } catch {
+    return true;
   }
 }
 
 function escucharDatos(uid, gen) {
   const vigente = () => gen === generacion;
+  revisarPendientesAlIniciar();
   const alFallar = (mensaje) => (error) => vigente() && mostrarError(error, mensaje);
 
   desuscribir.push(
@@ -147,7 +236,8 @@ function escucharDatos(uid, gen) {
     actualizarSesion({ turno });
   };
 
-  adoptarTurnoSinCandado(uid)
+  // Sin conexión se saltea: consulta al servidor y solo sirve para turnos de antes de la migración.
+  (estaOnline() ? adoptarTurnoSinCandado(uid) : Promise.resolve())
     .catch((error) => console.error("No se pudo revisar turnos anteriores", error))
     .finally(() => {
       if (!vigente()) return;
@@ -158,6 +248,19 @@ function escucharDatos(uid, gen) {
 function detenerListeners() {
   desuscribir.forEach((fn) => fn());
   desuscribir = [];
+}
+
+function renderConexion({ online, sincronizando }) {
+  const estado = $("estado-conexion");
+  mostrar(estado, !online || sincronizando);
+  estado.classList.toggle("sincronizando", online && sincronizando);
+  if (!online) {
+    estado.textContent = sincronizando
+      ? "⚠ Sin conexión · hay movimientos por subir"
+      : "⚠ Sin conexión · las ventas se guardan en este equipo";
+  } else if (sincronizando) {
+    estado.textContent = "↻ Subiendo movimientos…";
+  }
 }
 
 // ---------- Pantallas y navegación ----------

@@ -7,6 +7,7 @@ import { armarExcelResumen } from "../core/exportacion.js";
 import { productosConStockBajo } from "../core/productos.js";
 import { obtenerMovimientos } from "../data/reportes.js";
 import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
+import { estaOnline } from "../data/conexion.js";
 import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
 import { avisar, confirmar, conBoton, formularioModal, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
@@ -218,6 +219,8 @@ async function exportarExcel() {
 async function cerrarTurnoDesdeAdmin(turnoId) {
   const turno = movimientos?.turnos.find((t) => t.id === turnoId);
   if (!turno) return;
+  // Sin conexión no se ven las ventas que el empleado haya subido mientras tanto: el cierre daría mal.
+  if (!estaOnline()) return avisar("Sin conexión", "Para cerrar el turno de otro empleado hace falta internet.");
 
   // Lectura fresca: el empleado pudo haber vendido después de cargar el resumen.
   const caja = calcularCajaTurno({ cajaInicial: turno.cajaInicial, ...(await obtenerMovimientosTurno(turno)) });

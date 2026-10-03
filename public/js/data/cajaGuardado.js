@@ -1,6 +1,7 @@
 import { db, collection, doc, onSnapshot, runTransaction, serverTimestamp } from "../firebase.js";
 import { aCentavos, formatearMoneda } from "../lib/dinero.js";
 import { ErrorNegocio } from "../core/errores.js";
+import { estaOnline } from "./conexion.js";
 
 /**
  * Caja de guardado: el efectivo que se saca del cajón durante los turnos.
@@ -22,8 +23,12 @@ export function escucharSaldoGuardado(alCambiar, alFallar) {
 /**
  * Escribe un movimiento y actualiza el saldo en la misma transacción.
  * `armarMovimiento(saldoAnteriorCentavos)` devuelve los datos del movimiento y el saldo nuevo.
+ * Necesita conexión: el saldo se lee del servidor para que dos cajas no se pisen.
  */
-function moverSaldo(coleccion, armarMovimiento) {
+async function moverSaldo(coleccion, armarMovimiento) {
+  if (!estaOnline()) {
+    throw new ErrorNegocio("La caja de guardado necesita conexión a internet. Volvé a intentar cuando vuelva.");
+  }
   const movRef = doc(collection(db, coleccion));
   return runTransaction(db, async (tx) => {
     const anterior = leerSaldoCentavos(await tx.get(saldoRef));
