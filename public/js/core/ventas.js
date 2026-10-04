@@ -39,6 +39,11 @@ export function armarVenta(carrito, productos) {
   };
 }
 
+/** Productos distintos del carrito: las reglas solo dejan descontar stock de los que están en la venta. */
+export function productoIdsDe(carrito) {
+  return [...new Set(carrito.map((item) => item.productoId))];
+}
+
 /**
  * Lleva ventas viejas al formato actual. Antes la SUBE se guardaba con metodoPago "Sube";
  * ahora es tipo "sube" y el método es cómo pagó el cliente (las viejas se cobraban en efectivo).

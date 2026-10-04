@@ -138,6 +138,14 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 .alert-banner i { font-size: 1.5rem; margin-top: 3px; }
 .alert-banner ul { margin-left: 20px; margin-top: 5px; list-style-type: square; }
 .alert-banner li { font-size: 0.95rem; }
+.lista-problemas { margin: 0; padding-left: 18px; color: #991b1b; font-size: 0.9rem; }
+
+/* Usuarios */
+.form-usuario { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 15px; align-items: end; }
+@media (max-width: 900px) { .form-usuario { grid-template-columns: 1fr; } }
+.input-rol { min-width: 150px; padding: 6px 10px; }
+.alta-usuario { display: grid; gap: 10px; }
+.clave-temporal { display: block; font-size: 1.4rem; letter-spacing: 0.1em; background: #f1f5f9; padding: 10px; border-radius: 6px; user-select: all; }
 
 /* === FORMULARIO PRODUCTO === */
 .form-grid-producto { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; align-items: end; }

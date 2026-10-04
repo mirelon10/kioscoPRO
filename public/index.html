@@ -58,6 +58,7 @@
       <button type="button" class="nav-btn" data-target="sec-egresos"><i class="fa-solid fa-money-bill-transfer" aria-hidden="true"></i> Egresos</button>
       <button type="button" class="nav-btn" data-target="sec-stock"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Inventario</button>
       <button type="button" class="nav-btn hidden" id="nav-admin" data-target="sec-admin"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> Administración</button>
+      <button type="button" class="nav-btn hidden" id="nav-usuarios" data-target="sec-usuarios"><i class="fa-solid fa-users" aria-hidden="true"></i> Usuarios</button>
     </nav>
     <div class="sidebar-footer">
       <p id="estado-conexion" class="estado-conexion hidden" role="status"></p>
@@ -264,6 +265,21 @@
           </table>
         </div>
       </div>
+      <div class="card mt-4 hidden" id="card-movimientos-stock">
+        <div class="card-header">
+          <div>
+            <h4>Movimientos de stock</h4>
+            <p class="text-muted">Últimos 100 ingresos, bajas y conteos, con quién los hizo. Lo vendido figura en las ventas.</p>
+          </div>
+          <button type="button" id="btn-actualizar-movimientos" class="btn btn-secondary btn-sm"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualizar</button>
+        </div>
+        <div class="tabla-scroll">
+          <table class="table-modern">
+            <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="num">Cambio</th><th>Motivo</th><th>Usuario</th></tr></thead>
+            <tbody id="tabla-movimientos-stock"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- ADMINISTRACIÓN -->
@@ -315,6 +331,18 @@
           <button type="button" id="btn-ajustar-saldo" class="btn btn-secondary"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i> Ajustar saldo</button>
         </div>
 
+        <div class="card mb-4">
+          <h4><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Ventas para revisar</h4>
+          <p class="text-muted mb-3">Ventas del período con datos que no cierran (totales, subtotales, vueltos, precios por debajo del costo
+            o stock descontado de otros productos). La app no las genera sola: pueden ser ventas cargadas por fuera del sistema.</p>
+          <div class="tabla-scroll">
+            <table class="table-modern">
+              <thead><tr><th>Fecha</th><th>Empleado</th><th class="num">Total</th><th>Qué no cierra</th></tr></thead>
+              <tbody id="tabla-ventas-revisar"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="card">
           <h4 class="mb-3">Turnos del período</h4>
           <div class="tabla-scroll">
@@ -327,6 +355,42 @@
               <tbody id="tabla-turnos"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- USUARIOS (solo admin) -->
+    <section id="sec-usuarios" class="view-section hidden" aria-labelledby="titulo-usuarios">
+      <div class="section-header"><h2 id="titulo-usuarios">Usuarios</h2></div>
+
+      <div class="card mb-4">
+        <h4 class="mb-3">Nuevo usuario</h4>
+        <form id="form-nuevo-usuario" class="form-usuario" novalidate>
+          <div>
+            <label for="usuario-email" class="field-label">Email</label>
+            <input type="email" id="usuario-email" class="input-modern" maxlength="200" autocomplete="off" required>
+          </div>
+          <div>
+            <label for="usuario-rol" class="field-label">Rol</label>
+            <select id="usuario-rol" class="input-modern">
+              <option value="empleado">Empleado</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div class="form-acciones"><button type="submit" class="btn btn-success btn-block"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Crear usuario</button></div>
+        </form>
+        <p class="text-muted mt-3">Se genera una contraseña temporal para que le entregues. Un administrador puede ver todo y crear otros usuarios.</p>
+      </div>
+
+      <div class="card">
+        <h4>Usuarios del sistema</h4>
+        <p class="text-muted mb-3">Para quitarle el acceso a alguien, elegí <strong>Sin acceso</strong>. Los usuarios creados antes desde Firebase
+          aparecen acá cuando vuelven a entrar al sistema.</p>
+        <div class="tabla-scroll">
+          <table class="table-modern">
+            <thead><tr><th>Email</th><th>Rol</th><th>Alta</th></tr></thead>
+            <tbody id="tabla-usuarios"></tbody>
+          </table>
         </div>
       </div>
     </section>

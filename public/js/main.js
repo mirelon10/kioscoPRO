@@ -9,7 +9,9 @@ import {
 } from "./firebase.js";
 import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
+import { ROLES } from "./core/usuarios.js";
 import { escucharProductos } from "./data/productos.js";
+import { leerRolGuardado, registrarRolPropio, escucharRolPropio } from "./data/usuarios.js";
 import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
 import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
 import {
@@ -26,9 +28,11 @@ import { iniciarPos, vaciarPos, enfocarBuscador } from "./views/pos.js";
 import { iniciarTurno } from "./views/turno.js";
 import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/egresos.js";
 import { iniciarAdmin, reiniciarAdmin, abrirAdmin } from "./views/admin.js";
-import { iniciarStock, renderStock } from "./views/stock.js";
+import { iniciarStock, renderStock, cargarMovimientosStock } from "./views/stock.js";
+import { iniciarUsuarios, cargarUsuarios } from "./views/usuarios.js";
 
-const ROLES = { admin: "Administrador", empleado: "Empleado" };
+/** Secciones que solo ve el admin. */
+const SECCIONES_ADMIN = ["sec-admin", "sec-usuarios"];
 
 /** Listeners de Firestore activos: se cortan al cerrar sesión (si no, fallan por permisos). */
 let desuscribir = [];
@@ -42,6 +46,7 @@ iniciarTurno();
 iniciarEgresos();
 iniciarAdmin();
 iniciarStock();
+iniciarUsuarios();
 etiquetarTablasParaCelular();
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -58,6 +63,20 @@ if ("serviceWorker" in navigator) {
 }
 // Ventas o egresos hechos sin conexión que el servidor rechazó al subirlos.
 alProblemaDeSincronizacion(({ titulo, texto }) => avisar(titulo, texto));
+
+// Cerrar la pestaña o el navegador con el turno abierto: el navegador pregunta si salir (su propio
+// cartel, el texto no se puede cambiar). Si elige quedarse, se lo lleva a cerrar el turno.
+// Algunos navegadores de celular no muestran el cartel.
+window.addEventListener("beforeunload", (e) => {
+  if (!sesion.turno) return;
+  e.preventDefault();
+  e.returnValue = ""; // navegadores viejos
+  // Este temporizador corre solo si la página sigue abierta (eligió quedarse).
+  setTimeout(() => {
+    irA("sec-turnos");
+    avisar("Tenés un turno abierto", "Cerralo antes de salir del sistema, así la caja queda bien.");
+  }, 0);
+});
 
 onAuthStateChanged(auth, async (usuario) => {
   const gen = ++generacion;
@@ -97,11 +116,29 @@ const ESPERA_TOKEN_MS = 5000;
 const claveRol = (uid) => `kiosco.rol.${uid}`;
 
 /**
- * Lee el rol (custom claim). Fuerza la renovación del token para tomar roles recién asignados.
- * Sin internet usa el token en caché y, si ya venció (dura 1 hora), el último rol conocido en
- * este equipo. El rol solo decide qué pantallas se ven: los permisos los imponen las reglas.
+ * Lee el rol: primero el de Firestore (usuarios/{uid}, lo maneja el admin desde la app); si el usuario
+ * todavía no tiene documento, el del token (usuarios de antes) y le crea el documento con ese rol.
+ * El rol solo decide qué pantallas se ven: los permisos los imponen las reglas.
  */
 async function leerRol(usuario) {
+  const guardado = await leerRolGuardado(usuario.uid, ESPERA_TOKEN_MS);
+  if (guardado != null) {
+    recordarRol(usuario.uid, guardado);
+    return guardado;
+  }
+  const rol = await leerRolDelToken(usuario);
+  if (guardado === undefined && ROLES[rol] && estaOnline()) {
+    registrarRolPropio(usuario, rol).catch((error) => console.warn("No se pudo pasar el rol a Firestore", error));
+  }
+  return rol;
+}
+
+/**
+ * Rol del custom claim. Fuerza la renovación del token para tomar roles recién asignados.
+ * Sin internet usa el token en caché y, si ya venció (dura 1 hora), el último rol conocido en
+ * este equipo.
+ */
+async function leerRolDelToken(usuario) {
   try {
     const rol = (await conLimiteDeTiempo(usuario.getIdTokenResult(true), ESPERA_TOKEN_MS)).claims.rol;
     recordarRol(usuario.uid, rol);
@@ -206,6 +243,7 @@ function escucharDatos(uid, gen) {
   const alFallar = (mensaje) => (error) => vigente() && mostrarError(error, mensaje);
 
   desuscribir.push(
+    escucharRolPropio(uid, (rol) => vigente() && alCambiarRol(rol)),
     escucharProductos((productos) => vigente() && actualizarSesion({ productos }), alFallar("No se pudo cargar el catálogo.")),
     escucharSaldoGuardado(
       (saldoGuardado) => vigente() && actualizarSesion({ saldoGuardado }),
@@ -245,6 +283,21 @@ function escucharDatos(uid, gen) {
     });
 }
 
+/** El admin le cambió el rol a este usuario mientras tenía la sesión abierta. */
+function alCambiarRol(rol) {
+  if (rol === sesion.rol) return;
+  if (!ROLES[rol]) {
+    $("login-error").textContent = "Un administrador te quitó el acceso al sistema.";
+    return signOut(auth);
+  }
+  recordarRol(sesion.usuario.uid, rol);
+  actualizarSesion({ rol });
+  aplicarRol();
+  const visible = document.querySelector(".view-section:not(.hidden)")?.id;
+  if (SECCIONES_ADMIN.includes(visible) && !esAdmin()) irA("sec-pos");
+  avisar("Cambió tu rol", `Ahora sos ${ROLES[rol].toLowerCase()}.`);
+}
+
 function detenerListeners() {
   desuscribir.forEach((fn) => fn());
   desuscribir = [];
@@ -274,16 +327,21 @@ function mostrarPantalla(pantalla) {
 
 function prepararApp() {
   $("user-display").textContent = sesion.usuario.email;
-  $("user-rol").textContent = ROLES[sesion.rol];
-  mostrar($("nav-admin"), esAdmin());
+  aplicarRol();
   reiniciarFiltrosEgresos();
   reiniciarAdmin();
   vaciarPos();
   irA("sec-pos");
 }
 
+function aplicarRol() {
+  $("user-rol").textContent = ROLES[sesion.rol];
+  mostrar($("nav-admin"), esAdmin());
+  mostrar($("nav-usuarios"), esAdmin());
+}
+
 function irA(seccion) {
-  if (seccion === "sec-admin" && !esAdmin()) return;
+  if (SECCIONES_ADMIN.includes(seccion) && !esAdmin()) return;
 
   document.querySelectorAll(".nav-btn").forEach((b) => {
     const activo = b.dataset.target === seccion;
@@ -295,6 +353,10 @@ function irA(seccion) {
 
   if (seccion === "sec-pos") enfocarBuscador();
   if (seccion === "sec-egresos") cargarEgresos();
-  if (seccion === "sec-stock") renderStock();
+  if (seccion === "sec-stock") {
+    renderStock();
+    cargarMovimientosStock();
+  }
   if (seccion === "sec-admin") abrirAdmin();
+  if (seccion === "sec-usuarios") cargarUsuarios();
 }

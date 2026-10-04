@@ -20,12 +20,14 @@ const FIREBASE = "https://www.gstatic.com/firebasejs/12.19.0";
 const ARCHIVOS_APP = [
   "./",
   "css/style.css",
+  "js/core/auditoria.js",
   "js/core/caja.js",
   "js/core/egresos.js",
   "js/core/errores.js",
   "js/core/exportacion.js",
   "js/core/productos.js",
   "js/core/resumen.js",
+  "js/core/usuarios.js",
   "js/core/ventas.js",
   "js/data/cajaGuardado.js",
   "js/data/conexion.js",
@@ -33,6 +35,7 @@ const ARCHIVOS_APP = [
   "js/data/productos.js",
   "js/data/reportes.js",
   "js/data/turnos.js",
+  "js/data/usuarios.js",
   "js/data/ventas.js",
   "js/estado.js",
   "js/firebase.js",
@@ -49,13 +52,16 @@ const ARCHIVOS_APP = [
   "js/views/pos.js",
   "js/views/stock.js",
   "js/views/turno.js",
+  "js/views/usuarios.js",
 ];
 
 // SheetJS (exportar a Excel) no se descarga de antemano: pesa casi 1 MB y se guarda la primera vez que se usa.
+// reCAPTCHA (www.google.com) no se guarda: sin internet no hay tokens de App Check igual.
 const ARCHIVOS_CDN = [
   `${FIREBASE}/firebase-app.js`,
   `${FIREBASE}/firebase-firestore.js`,
   `${FIREBASE}/firebase-auth.js`,
+  `${FIREBASE}/firebase-app-check.js`,
   "https://cdn.jsdelivr.net/npm/sweetalert2@11.26.25/dist/sweetalert2.all.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css",
   "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/webfonts/fa-solid-900.woff2",

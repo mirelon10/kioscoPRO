@@ -6,6 +6,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -40,6 +41,33 @@ async function sembrar(datos) {
 }
 
 const producto = (extra = {}) => ({ codigo: "779", nombre: "Agua", categoria: "Bebidas", precioCompra: 400, margen: 50, precio: 600, stock: 10, ...extra });
+
+let numeroMovimiento = 0;
+const movimientoStock = (uid, productoId, tipo, cambio, extra = {}) => ({
+  productoId,
+  productoNombre: "Agua",
+  tipo,
+  cambio,
+  motivo: "",
+  empleadoId: uid,
+  empleadoNombre: `${uid}@kiosco.test`,
+  fecha: serverTimestamp(),
+  ...extra,
+});
+
+/**
+ * Ajuste de stock como lo hace la app: el movimiento y el cambio de stock en un batch.
+ * Ingreso y baja suman con increment(); el conteo fija el número contado.
+ */
+function ajustarStock(fs, uid, productoId, { tipo, cambio, stock, movId = `mov-${++numeroMovimiento}` }) {
+  const batch = writeBatch(fs);
+  batch.set(
+    doc(fs, "movimientosStock", movId),
+    movimientoStock(uid, productoId, tipo, cambio, tipo === "conteo" ? { stockContado: stock } : {}),
+  );
+  batch.update(doc(fs, "productos", productoId), { stock: tipo === "conteo" ? stock : increment(cambio), ultimoAjuste: movId });
+  return batch.commit();
+}
 
 function abrirTurno(fs, uid, turnoId = `turno-${uid}`) {
   const batch = writeBatch(fs);
@@ -147,27 +175,73 @@ describe("productos", () => {
     await assertFails(setDoc(doc(fs, "productos/e"), producto({ campoRaro: true })));
   });
 
-  test("el empleado puede subir y bajar el stock, pero nunca dejarlo negativo ni tocar otros campos", async () => {
+  test("el empleado ajusta el stock con un movimiento registrado, pero nunca lo deja negativo ni toca otros campos", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     const fs = comoAna();
-    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 4 }));
-    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 50 })); // ingreso de mercadería
-    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: increment(-10) })); // baja
-    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { stock: 0 })); // conteo
-    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: increment(-1) })); // quedaría negativo
-    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: -1 }));
-    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 2.5 }));
+    await assertSucceeds(ajustarStock(fs, ANA, "p1", { tipo: "ingreso", cambio: 45 })); // 50
+    await assertSucceeds(ajustarStock(fs, ANA, "p1", { tipo: "baja", cambio: -10 })); // 40
+    await assertSucceeds(ajustarStock(fs, ANA, "p1", { tipo: "conteo", cambio: -40, stock: 0 }));
+    await assertFails(ajustarStock(fs, ANA, "p1", { tipo: "baja", cambio: -1 })); // quedaría negativo
     await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 3, precio: 1 }));
+  });
+
+  test("sin movimiento, o con uno que no coincide con el cambio, el stock no se toca", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }), "productos/p2": producto({ stock: 5 }) });
+    const fs = comoAna();
+    const conMovimiento = (movId, mov, cambioStock) => {
+      const batch = writeBatch(fs);
+      batch.set(doc(fs, "movimientosStock", movId), mov);
+      batch.update(doc(fs, "productos/p1"), { ...cambioStock, ultimoAjuste: movId });
+      return batch.commit();
+    };
+
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 4 }));
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 4, ultimoAjuste: "no-existe" }));
+    await assertFails(conMovimiento("m1", movimientoStock(ANA, "p1", "ingreso", 5), { stock: increment(6) }));
+    await assertFails(conMovimiento("m2", movimientoStock(ANA, "p2", "ingreso", 5), { stock: increment(5) })); // otro producto
+    await assertFails(conMovimiento("m3", movimientoStock(BETO, "p1", "ingreso", 5), { stock: increment(5) })); // a nombre de otro
+    await assertFails(conMovimiento("m4", movimientoStock(ANA, "p1", "ingreso", -1), { stock: increment(-1) })); // ingreso negativo
+    await assertFails(conMovimiento("m5", movimientoStock(ANA, "p1", "baja", 1), { stock: increment(1) })); // baja positiva
+    await assertFails(conMovimiento("m6", movimientoStock(ANA, "p1", "conteo", -1, { stockContado: 3 }), { stock: 4 })); // contado ≠ stock
+    await assertFails(conMovimiento("m7", movimientoStock(ANA, "p1", "ingreso", 5, { fecha: new Date(2020, 0, 1) }), { stock: increment(5) }));
+    // El movimiento solo, sin el cambio de stock que explica, tampoco entra.
+    await assertFails(setDoc(doc(fs, "movimientosStock/m8"), movimientoStock(ANA, "p1", "ingreso", 5)));
+    // No se puede reusar un movimiento ya registrado.
+    await assertSucceeds(ajustarStock(fs, ANA, "p1", { tipo: "ingreso", cambio: 1, movId: "m9" }));
+    await assertFails(ajustarStock(fs, ANA, "p1", { tipo: "ingreso", cambio: 1, movId: "m9" }));
+  });
+
+  test("los movimientos de stock son inmutables; el empleado ve los suyos y el admin todos", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }) });
+    await ajustarStock(comoAna(), ANA, "p1", { tipo: "ingreso", cambio: 2, movId: "m1" });
+    const ref = doc(comoAna(), "movimientosStock/m1");
+    await assertFails(updateDoc(ref, { cambio: 200 }));
+    await assertFails(deleteDoc(ref));
+    await assertSucceeds(getDoc(ref));
+    await assertFails(getDoc(doc(comoBeto(), "movimientosStock/m1")));
+    await assertSucceeds(getDocs(collection(comoAdmin(), "movimientosStock")));
   });
 
   test("un usuario sin rol no puede tocar el stock", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     await assertFails(updateDoc(doc(sinRol(), "productos/p1"), { stock: 6 }));
+    await assertFails(ajustarStock(sinRol(), "intruso", "p1", { tipo: "ingreso", cambio: 1 }));
+  });
+
+  test("el admin edita los datos pero no el stock (el stock solo cambia con ventas o ajustes)", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }) });
+    const fs = comoAdmin();
+    await assertSucceeds(updateDoc(doc(fs, "productos/p1"), { precio: 700, nombre: "Agua 2L" }));
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 99 }));
+    await assertFails(setDoc(doc(fs, "productos/p1"), producto({ stock: 99 })));
+    await assertSucceeds(ajustarStock(fs, ADMIN, "p1", { tipo: "ingreso", cambio: 10 }));
   });
 
   test("al editar, el admin puede borrar campos viejos como codigoBarra", async () => {
     await sembrar({ "productos/p1": { codigoBarra: "779", nombre: "Agua", precio: 600, stock: 5 } });
-    await assertSucceeds(setDoc(doc(comoAdmin(), "productos/p1"), producto()));
+    await assertSucceeds(
+      updateDoc(doc(comoAdmin(), "productos/p1"), { codigo: "779", categoria: "", precioCompra: 400, margen: 50, codigoBarra: deleteField() }),
+    );
   });
 });
 
@@ -276,35 +350,53 @@ describe("ventas", () => {
     await assertSucceeds(addDoc(collection(fs, "ventas"), venta(ANA)));
   });
 
+  /** Venta + descuento de stock en un batch, como la transacción de la app (o la venta sin conexión con increment). */
+  function venderConStock(fs, ventaId, descuentos, extraVenta = {}) {
+    const batch = writeBatch(fs);
+    for (const [productoId, stock] of Object.entries(descuentos)) {
+      batch.update(doc(fs, "productos", productoId), { stock, ultimaVenta: ventaId });
+    }
+    batch.set(doc(fs, "ventas", ventaId), venta(ANA, { productoIds: Object.keys(descuentos), ...extraVenta }));
+    return batch.commit();
+  }
+
   test("venta + descuento de stock en el mismo batch (como la transacción de la app)", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    const batch = writeBatch(fs);
-    batch.update(doc(fs, "productos/p1"), { stock: 4 });
-    batch.set(doc(collection(fs, "ventas")), venta(ANA));
-    await assertSucceeds(batch.commit());
+    await assertSucceeds(venderConStock(fs, "v1", { p1: 4 }));
   });
 
   test("venta sin conexión: venta + increment del stock en un batch, como la sube la app al reconectar", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    const batch = writeBatch(fs);
-    batch.update(doc(fs, "productos/p1"), { stock: increment(-2) });
-    batch.set(doc(fs, "ventas/v-offline"), venta(ANA));
-    await assertSucceeds(batch.commit());
+    await assertSucceeds(venderConStock(fs, "v-offline", { p1: increment(-2) }));
   });
 
   test("venta sin conexión con stock agotado: el batch se rechaza, pero la venta sola entra", async () => {
     await sembrar({ "productos/p1": producto({ stock: 1 }) });
     const fs = comoAna();
     await abrirTurno(fs, ANA);
-    const batch = writeBatch(fs);
-    batch.update(doc(fs, "productos/p1"), { stock: increment(-2) });
-    batch.set(doc(fs, "ventas/v-offline"), venta(ANA));
-    await assertFails(batch.commit());
+    await assertFails(venderConStock(fs, "v-offline", { p1: increment(-2) }));
     await assertSucceeds(setDoc(doc(fs, "ventas/v-offline"), venta(ANA)));
+  });
+
+  test("una venta solo descuenta el stock de sus productos, nunca lo sube, y no se reusa", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 5 }), "productos/p2": producto({ stock: 5 }) });
+    const fs = comoAna();
+    await abrirTurno(fs, ANA);
+
+    // p2 no está en la venta
+    const batch = writeBatch(fs);
+    batch.update(doc(fs, "productos/p2"), { stock: 4, ultimaVenta: "v1" });
+    batch.set(doc(fs, "ventas/v1"), venta(ANA, { productoIds: ["p1"] }));
+    await assertFails(batch.commit());
+
+    await assertFails(venderConStock(fs, "v2", { p1: 6 })); // sube el stock
+    await assertSucceeds(venderConStock(fs, "v3", { p1: 4 }));
+    // Una venta ya guardada no sirve para descontar de nuevo.
+    await assertFails(updateDoc(doc(fs, "productos/p1"), { stock: 3, ultimaVenta: "v3" }));
   });
 
   test("una venta sin conexión que ya entró por la transacción no se duplica", async () => {
@@ -516,5 +608,61 @@ describe("caja de guardado", () => {
     await assertFails(getDocs(guardados));
     await assertFails(getDocs(query(collection(comoBeto(), "guardados"), where("empleadoId", "==", ANA))));
     await assertSucceeds(getDocs(collection(comoAdmin(), "guardados")));
+  });
+});
+
+describe("usuarios y roles", () => {
+  const usuario = (email, rol, creadoPor = ADMIN) => ({ email, rol, creadoPor, fecha: serverTimestamp() });
+  /** Usuario con el rol solo en Firestore (sin custom claim), como los que crea el admin desde la app. */
+  const comoUsuario = (uid) => env.authenticatedContext(uid, { email: `${uid}@kiosco.test` }).firestore();
+
+  test("el admin da de alta empleados y admins; nadie más", async () => {
+    await assertSucceeds(setDoc(doc(comoAdmin(), "usuarios/nuevo1"), usuario("nuevo1@kiosco.test", "empleado")));
+    await assertSucceeds(setDoc(doc(comoAdmin(), "usuarios/nuevo2"), usuario("nuevo2@kiosco.test", "admin")));
+    await assertFails(setDoc(doc(comoAdmin(), "usuarios/nuevo3"), usuario("nuevo3@kiosco.test", "dueño")));
+    await assertFails(setDoc(doc(comoAdmin(), "usuarios/nuevo4"), usuario("nuevo4@kiosco.test", "empleado", ANA))); // creadoPor falso
+    await assertFails(setDoc(doc(comoAna(), "usuarios/nuevo5"), usuario("nuevo5@kiosco.test", "empleado", ANA)));
+    await assertFails(setDoc(doc(sinRol(), "usuarios/intruso"), usuario("intruso@kiosco.test", "admin", "intruso")));
+  });
+
+  test("el rol en Firestore da los permisos, aunque no haya custom claim", async () => {
+    await sembrar({ "productos/p1": producto(), "usuarios/carla": { email: "carla@kiosco.test", rol: "empleado" }, "usuarios/dani": { email: "dani@kiosco.test", rol: "admin" } });
+    await assertSucceeds(getDoc(doc(comoUsuario("carla"), "productos/p1")));
+    await assertFails(setDoc(doc(comoUsuario("carla"), "productos/p2"), producto()));
+    await assertSucceeds(setDoc(doc(comoUsuario("dani"), "productos/p2"), producto()));
+  });
+
+  test("el documento manda sobre el custom claim: con rol 'ninguno' se pierde el acceso", async () => {
+    await sembrar({ "productos/p1": producto(), [`usuarios/${ANA}`]: { email: "ana@kiosco.test", rol: "ninguno" } });
+    await assertFails(getDoc(doc(comoAna(), "productos/p1")));
+  });
+
+  test("un usuario de antes pasa su propio rol a Firestore, pero no puede cambiarlo", async () => {
+    await assertFails(setDoc(doc(comoAna(), `usuarios/${ANA}`), usuario(`${ANA}@kiosco.test`, "admin", ANA)));
+    await assertFails(setDoc(doc(comoAna(), `usuarios/${ANA}`), usuario("otro@kiosco.test", "empleado", ANA)));
+    await assertFails(setDoc(doc(comoAna(), `usuarios/${BETO}`), usuario(`${BETO}@kiosco.test`, "empleado", ANA)));
+    await assertSucceeds(setDoc(doc(comoAna(), `usuarios/${ANA}`), usuario(`${ANA}@kiosco.test`, "empleado", ANA)));
+    // Sin rol en el token no hay nada que pasar.
+    await assertFails(setDoc(doc(sinRol(), "usuarios/intruso"), usuario("intruso@kiosco.test", "empleado", "intruso")));
+  });
+
+  test("el admin cambia el rol de otros, nunca el suyo", async () => {
+    await sembrar({ "usuarios/carla": { email: "carla@kiosco.test", rol: "empleado" }, [`usuarios/${ADMIN}`]: { email: "admin@kiosco.test", rol: "admin" } });
+    const cambio = (rol, por = ADMIN) => ({ rol, actualizadoPor: por, actualizado: serverTimestamp() });
+    await assertSucceeds(updateDoc(doc(comoAdmin(), "usuarios/carla"), cambio("ninguno")));
+    await assertSucceeds(updateDoc(doc(comoAdmin(), "usuarios/carla"), cambio("admin")));
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), cambio("dueño")));
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), { ...cambio("empleado"), email: "otro@kiosco.test" }));
+    await assertFails(updateDoc(doc(comoAdmin(), `usuarios/${ADMIN}`), cambio("empleado")));
+    await assertFails(updateDoc(doc(comoAna(), "usuarios/carla"), cambio("ninguno", ANA)));
+    await assertFails(deleteDoc(doc(comoAdmin(), "usuarios/carla")));
+  });
+
+  test("cada uno lee su documento; el admin, todos", async () => {
+    await sembrar({ [`usuarios/${ANA}`]: { email: "ana@kiosco.test", rol: "empleado" }, [`usuarios/${BETO}`]: { email: "beto@kiosco.test", rol: "empleado" } });
+    await assertSucceeds(getDoc(doc(comoAna(), `usuarios/${ANA}`)));
+    await assertFails(getDoc(doc(comoAna(), `usuarios/${BETO}`)));
+    await assertFails(getDocs(collection(comoAna(), "usuarios")));
+    await assertSucceeds(getDocs(collection(comoAdmin(), "usuarios")));
   });
 });

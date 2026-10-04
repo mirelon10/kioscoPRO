@@ -11,6 +11,7 @@ import {
   increment,
 } from "../firebase.js";
 import { armarCobro } from "../core/caja.js";
+import { productoIdsDe } from "../core/ventas.js";
 import { ErrorNegocio } from "../core/errores.js";
 import { conLimiteDeTiempo, esErrorDeConexion } from "../lib/espera.js";
 import { formatearMoneda, redondear } from "../lib/dinero.js";
@@ -52,7 +53,7 @@ export async function registrarVenta(venta) {
   return venderSinConexion(ventaRef, venta);
 }
 
-function datosVenta({ turnoId, usuario, metodoPago, montoRecibido = null }, { lineas, total, vuelto }) {
+function datosVenta({ turnoId, usuario, metodoPago, carrito, montoRecibido = null }, { lineas, total, vuelto }) {
   return {
     tipo: "productos",
     turnoId,
@@ -60,6 +61,7 @@ function datosVenta({ turnoId, usuario, metodoPago, montoRecibido = null }, { li
     empleadoNombre: usuario.email,
     metodoPago,
     items: lineas,
+    productoIds: productoIdsDe(carrito),
     total,
     montoRecibido: metodoPago === "Efectivo" ? redondear(montoRecibido) : null,
     vuelto,
@@ -81,7 +83,8 @@ function venderEnTransaccion(ventaRef, venta) {
       venta.montoRecibido,
     );
 
-    refs.forEach((ref, i) => tx.update(ref, { stock: cobro.nuevosStocks[i] }));
+    // ultimaVenta: las reglas verifican que el descuento venga junto con esta venta.
+    refs.forEach((ref, i) => tx.update(ref, { stock: cobro.nuevosStocks[i], ultimaVenta: ventaRef.id }));
     tx.set(ventaRef, datosVenta(venta, cobro));
     return { id: ventaRef.id, total: cobro.total, vuelto: cobro.vuelto };
   });
@@ -107,7 +110,7 @@ async function venderSinConexion(ventaRef, venta) {
   const datos = datosVenta(venta, cobro);
 
   const batch = writeBatch(db);
-  venta.carrito.forEach((item, i) => batch.update(refs[i], { stock: increment(-item.cantidad) }));
+  venta.carrito.forEach((item, i) => batch.update(refs[i], { stock: increment(-item.cantidad), ultimaVenta: ventaRef.id }));
   batch.set(ventaRef, datos);
 
   const descripcion = `Venta de ${formatearMoneda(cobro.total)} (${venta.metodoPago})`;

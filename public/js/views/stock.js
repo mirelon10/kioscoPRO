@@ -1,7 +1,14 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
 import { calcularPrecioVenta, formatearMoneda } from "../lib/dinero.js";
+import { formatearFechaHora } from "../lib/fechas.js";
 import { calcularAjusteStock, construirProducto, MODOS_AJUSTE_STOCK, UMBRAL_STOCK_BAJO } from "../core/productos.js";
-import { ajustarStock, crearProducto, eliminarProducto, guardarProducto } from "../data/productos.js";
+import {
+  ajustarStock,
+  crearProducto,
+  eliminarProducto,
+  guardarProducto,
+  obtenerMovimientosStock,
+} from "../data/productos.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
 import { avisar, confirmar, conBoton, formularioModal, mostrarError, notificarExito } from "../ui.js";
 
@@ -22,6 +29,9 @@ export function iniciarStock() {
   });
 
   filtro.addEventListener("input", renderStock);
+
+  const btnMovimientos = $("btn-actualizar-movimientos");
+  btnMovimientos.addEventListener("click", () => conBoton(btnMovimientos, cargarMovimientosStock));
 
   tbody.addEventListener("click", (e) => {
     const boton = e.target.closest("button[data-accion]");
@@ -46,6 +56,7 @@ export function iniciarStock() {
 export function renderStock() {
   const admin = esAdmin();
   mostrar($("card-nuevo-producto"), admin);
+  mostrar($("card-movimientos-stock"), admin);
   mostrar($("th-costo"), admin);
   const columnas = admin ? 7 : 6;
 
@@ -134,7 +145,7 @@ const FORMULARIO_EDICION = `
       <label>Margen %<input id="swal-margen" type="number" min="0" step="0.01" class="swal2-input"></label>
     </div>
     <label>Precio de venta<input id="swal-precio" class="swal2-input input-readonly" readonly tabindex="-1"></label>
-    <label>Stock<input id="swal-stock" type="number" min="0" step="1" class="swal2-input"></label>
+    <p class="text-muted">El stock se cambia con el botón "Stock", que deja registrado el movimiento.</p>
   </div>`;
 
 async function editar(producto) {
@@ -149,7 +160,6 @@ async function editar(producto) {
       campo(popup, "nombre").value = producto.nombre;
       campo(popup, "compra").value = producto.precioCompra;
       campo(popup, "margen").value = producto.margen;
-      campo(popup, "stock").value = producto.stock;
       const recalcular = () => {
         campo(popup, "precio").value = formatearMoneda(
           calcularPrecioVenta(campo(popup, "compra").value, campo(popup, "margen").value),
@@ -166,7 +176,7 @@ async function editar(producto) {
         nombre: campo(popup, "nombre").value,
         precioCompra: campo(popup, "compra").value,
         margen: campo(popup, "margen").value,
-        stock: campo(popup, "stock").value,
+        stock: producto.stock, // no se edita acá (ver guardarProducto)
       });
       if (error) return error;
       if (existeCodigo(editado.codigo, producto.id)) return `Ya existe otro producto con el código ${editado.codigo}.`;
@@ -186,6 +196,7 @@ const FORMULARIO_AJUSTE = `
     <p id="ajuste-producto" class="text-muted"></p>
     <label>Tipo de ajuste<select id="ajuste-modo" class="swal2-select"></select></label>
     <label><span id="ajuste-etiqueta">Cantidad</span><input id="ajuste-cantidad" type="number" min="0" step="1" class="swal2-input" inputmode="numeric"></label>
+    <label>Motivo <small>(opcional)</small><input id="ajuste-motivo" class="swal2-input" maxlength="200" placeholder="Ej: llegó el proveedor, se rompió, vencido"></label>
     <p id="ajuste-resultado" class="ajuste-resultado" aria-live="polite"></p>
   </div>`;
 
@@ -217,13 +228,13 @@ async function ajustar(producto) {
     },
     leer: (popup) => {
       const resultado = leerAjuste(popup);
-      return resultado.error ?? { ...resultado, modo: campo(popup, "modo").value };
+      return resultado.error ?? { ...resultado, modo: campo(popup, "modo").value, motivo: campo(popup, "motivo").value.trim() };
     },
   });
   if (!ajuste) return;
 
   try {
-    await ajustarStock(producto.id, ajuste);
+    await ajustarStock(producto, ajuste, sesion.usuario);
   } catch (error) {
     // Si se vendió mientras el modal estaba abierto, una baja puede dejar el stock negativo.
     if (error.code === "permission-denied") {
@@ -232,6 +243,38 @@ async function ajustar(producto) {
     throw error;
   }
   notificarExito(`${producto.nombre}: ${ajuste.cambio > 0 ? "+" : ""}${ajuste.cambio} unidades`);
+  if (esAdmin()) cargarMovimientosStock().catch((error) => console.error(error));
+}
+
+// ---------- Historial de movimientos de stock (admin) ----------
+
+const TIPOS_MOVIMIENTO = { ingreso: "Ingreso", baja: "Baja", conteo: "Conteo" };
+
+export async function cargarMovimientosStock() {
+  if (!esAdmin()) return;
+  const tbodyMov = $("tabla-movimientos-stock");
+  let movimientos;
+  try {
+    movimientos = await obtenerMovimientosStock();
+  } catch (error) {
+    return mostrarError(error, "No se pudieron cargar los movimientos de stock.");
+  }
+  if (movimientos.length === 0) return filaVacia(tbodyMov, 6, "Todavía no hay movimientos registrados.");
+
+  tbodyMov.replaceChildren(
+    ...movimientos.map((m) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, formatearFechaHora(m.fecha)),
+        h("td", {}, m.productoNombre),
+        h("td", {}, TIPOS_MOVIMIENTO[m.tipo] ?? m.tipo, m.tipo === "conteo" ? h("small", { class: "text-muted d-block" }, `contado: ${m.stockContado}`) : null),
+        h("td", { class: `num ${m.cambio < 0 ? "text-danger" : "text-success"}` }, `${m.cambio > 0 ? "+" : ""}${m.cambio}`),
+        h("td", {}, m.motivo || "-"),
+        h("td", {}, m.empleadoNombre),
+      ),
+    ),
+  );
 }
 
 async function borrar(producto) {
