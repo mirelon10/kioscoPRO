@@ -5,7 +5,7 @@ import { calcularCajaTurno } from "../core/caja.js";
 import { abrirTurno, cerrarTurno } from "../data/turnos.js";
 import { registrarGuardado } from "../data/cajaGuardado.js";
 import { sesion, alCambiarSesion } from "../estado.js";
-import { avisar, confirmar, conBoton, mostrarDetalle, notificarExito } from "../ui.js";
+import { avisar, confirmar, conBoton, mostrarDetalle, notificarExito, notificarRegistro } from "../ui.js";
 import { desgloseCierre } from "./desglose.js";
 
 const formAbrir = $("vista-abrir-turno");
