@@ -1,10 +1,11 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
 import { formatearMoneda, parsearMonto } from "../lib/dinero.js";
-import { fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
+import { aDate, fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } from "../lib/fechas.js";
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
 import { calcularCajaTurno } from "../core/caja.js";
 import { armarExcelResumen } from "../core/exportacion.js";
 import { productosConStockBajo } from "../core/productos.js";
+import { revisarVentas } from "../core/auditoria.js";
 import { obtenerMovimientos } from "../data/reportes.js";
 import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
 import { estaOnline } from "../data/conexion.js";
@@ -118,7 +119,32 @@ function renderResumen() {
   $("metric-neto").textContent = formatearMoneda(r.neto);
 
   renderTurnos(r.turnos);
+  renderVentasParaRevisar();
   btnExcel.disabled = false;
+}
+
+function renderVentasParaRevisar() {
+  const tbody = $("tabla-ventas-revisar");
+  const empleadoId = selectEmpleado.value;
+  const ventas = movimientos.ventas.filter((v) => {
+    const fecha = aDate(v.timestamp);
+    return (!empleadoId || v.empleadoId === empleadoId) && fecha != null && fecha >= movimientos.desde && fecha <= movimientos.hasta;
+  });
+  const marcadas = revisarVentas(ventas, sesion.productos);
+  if (marcadas.length === 0) return filaVacia(tbody, 4, "No hay ventas con datos que no cierren en el período.");
+
+  tbody.replaceChildren(
+    ...marcadas.map(({ venta, problemas }) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, formatearFechaHora(venta.timestamp)),
+        h("td", {}, venta.empleadoNombre || venta.empleadoId),
+        h("td", { class: "num" }, formatearMoneda(Number(venta.total) || 0)),
+        h("td", {}, h("ul", { class: "lista-problemas" }, ...problemas.map((p) => h("li", {}, p)))),
+      ),
+    ),
+  );
 }
 
 function renderTurnos(filas) {

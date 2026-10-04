@@ -21,7 +21,7 @@ public/                  ← lo que publica Netlify
     lib/                 ← utilidades: dinero, fechas, DOM, Excel
     core/                ← reglas de negocio puras (testeables con Node)
     data/                ← acceso a Firestore
-    views/               ← una vista por sección: pos, turno, egresos, admin, stock (+ desglose del cierre)
+    views/               ← una vista por sección: pos, turno, egresos, admin, stock, usuarios (+ desglose del cierre)
 firestore.rules          ← seguridad (la parte más importante)
 firestore.indexes.json   ← índices compuestos
 netlify.toml             ← publicación y cabeceras de seguridad (CSP)
@@ -41,19 +41,31 @@ npm install
 npx firebase login   # en una terminal propia: el login es interactivo
 ```
 
-### 2. Asignar roles
+### 2. Usuarios y roles
 
-Los roles viven en el token del usuario (custom claim `rol`), no en el código. Primero creá los usuarios
-en Firebase Console → Authentication. Después, con la clave de cuenta de servicio **fuera** del repositorio:
+El admin crea los usuarios desde la sección **Usuarios** de la app: elige email y rol (empleado o
+administrador) y la app genera una contraseña temporal para entregarle. Desde ahí también cambia roles
+o quita el acceso (**Sin acceso**). Nadie puede cambiarse su propio rol.
+
+- El rol vive en `usuarios/{uid}` (Firestore) y las reglas lo leen en cada pedido: un cambio se aplica
+  enseguida, y a quien le quitan el acceso la app lo saca.
+- La cuenta se crea con una segunda instancia de Firebase (`crearCuenta` en `firebase.js`) para no cerrar
+  la sesión del admin. Por eso el **registro de cuentas tiene que estar habilitado** en Firebase Auth.
+  Cualquiera podría crearse una cuenta por la API, pero sin documento en `usuarios` no tiene rol ni acceso.
+- Las cuentas no se pueden borrar desde el navegador: para eso, Firebase Console → Authentication.
+- Usuarios de antes, con el rol en el token (custom claim, `scripts/set-rol.js`): la app les crea el
+  documento con ese mismo rol la próxima vez que entran. `set-rol` sigue sirviendo para dar de alta al
+  primer admin:
 
 ```powershell
 $env:GOOGLE_APPLICATION_CREDENTIALS="C:\claves\kiosco-admin.json"
 npm run set-rol -- nachomiretti@gmail.com admin
-npm run set-rol -- empleado@ejemplo.com empleado
-npm run set-rol -- ex-empleado@ejemplo.com ninguno   # quita el acceso
 ```
 
-Un usuario sin rol no puede entrar.
+**App Check.** Cada pedido a Firebase lleva un token de reCAPTCHA v3 que prueba que viene de esta app.
+La clave del sitio está en `RECAPTCHA_SITE_KEY` (`public/js/firebase.js`); la secreta, en Firebase
+Console → App Check. En `localhost` se usa un token de depuración: la consola del navegador lo muestra
+y hay que registrarlo en App Check → Apps → *Administrar tokens de depuración*. Los emuladores no lo usan.
 
 ### 3. Publicar
 
@@ -68,8 +80,12 @@ documentos, publicá primero las reglas (que aceptan el formato nuevo) y despué
 ### 4. Netlify
 
 `netlify.toml` indica que se publica la carpeta `public/` y no hay comando de build.
-La API key web está restringida por referente HTTP: si agregás un dominio (por ejemplo, *deploy previews*
-`https://*--kioscoproo.netlify.app/*`), sumalo en Google Cloud → Credenciales.
+La API key web está restringida en Google Cloud → Credenciales:
+
+- **Sitios web:** `https://kioscoproo.netlify.app/*`, `https://kioscopro-db07e.firebaseapp.com/*` y
+  `http://localhost:3000/*`. Google no acepta comodines como `*--kioscoproo`, así que en los *deploy previews*
+  el login falla: probá en local o sumá temporalmente la URL exacta del preview.
+- **APIs:** Identity Toolkit, Token Service, Cloud Firestore y Firebase App Check.
 
 ## Desarrollo local
 
@@ -123,8 +139,23 @@ verifican que el saldo cambie exactamente en ese monto y nunca quede negativo. E
 
 **Inventario:** sección para todos los usuarios. El admin da de alta, edita y borra productos. El empleado ve
 el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja por rotura o
-vencimiento (−) o conteo (fija el número contado). Ingresos y bajas usan `increment()`, así no pisan una venta
-que entre mientras el modal está abierto.
+vencimiento (−) o conteo (fija el número contado), con un motivo opcional. Ingresos y bajas usan `increment()`,
+así no pisan una venta que entre mientras el modal está abierto.
+
+**Movimientos de stock:** todo cambio de stock queda explicado. Cada ajuste se guarda en `movimientosStock`
+en el mismo batch que el cambio (quién, cuándo, cuánto, motivo), y cada descuento por venta va junto con la venta
+que lo incluye (`productoIds`). El producto guarda cuál fue (`ultimoAjuste` / `ultimaVenta`) y las reglas
+rechazan cualquier cambio de stock sin su justificación. El admin edita los datos del producto pero no el stock.
+En *Inventario* ve los últimos 100 movimientos.
+
+**Ventas para revisar** ([`core/auditoria.js`](public/js/core/auditoria.js)): en *Administración*, las ventas del
+período con datos que no cierran: total distinto de la suma de los productos, subtotales o vueltos mal
+calculados, precios por debajo del costo actual o stock descontado de otros productos. La app nunca las genera:
+son la señal de una venta cargada por fuera del sistema.
+
+**Turno abierto al cerrar la pestaña:** el navegador pregunta si salir (su propio cartel, el texto no se puede
+cambiar) y, si la persona se queda, la app la lleva a *Caja y turnos*. Algunos navegadores de celular no
+muestran el cartel.
 
 **Cierre forzado:** si un empleado se va sin cerrar, el admin lo cierra desde *Administración → Turnos del
 período* (botón *Cerrar*). Queda registrado quién lo cerró.
@@ -171,10 +202,12 @@ verificar que sigan iguales. Si el borrado falla, se reintenta la próxima vez q
 
 | Colección | Documento | Quién escribe |
 |---|---|---|
-| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock` | Admin. El empleado solo puede cambiar `stock` (al cobrar y desde Inventario), nunca dejarlo negativo. |
+| `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock, ultimaVenta, ultimoAjuste` | Admin (sin tocar el stock). El stock cambia solo con una venta o un movimiento, nunca negativo. |
+| `movimientosStock/{id}` | `productoId, productoNombre, tipo ("ingreso"\|"baja"\|"conteo"), cambio, stockContado (conteo), motivo, empleadoId, empleadoNombre, fecha` | Admin o empleado, junto con el cambio de stock. **Inmutables.** |
+| `usuarios/{uid}` | `email, rol ("admin"\|"empleado"\|"ninguno"), creadoPor, fecha` + `actualizadoPor, actualizado` | Admin (nunca su propio rol). Un usuario de antes crea el suyo con el rol de su token. |
 | `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
-| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
+| `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], productoIds[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
 | `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, tipo ("fijo"\|"variable"), origen ("caja"\|"guardado"), fecha` | Empleado con turno abierto. Con origen `guardado`, junto con el saldo. **Inmutables.** |
 | `guardados/{id}` | `turnoId, empleadoId, empleadoNombre, monto, fecha` | Caja de guardado. Empleado con turno abierto, junto con el saldo. **Inmutables.** |
 | `cajaGuardado/saldo` | `saldoCentavos, movColeccion, movId, actualizado` | Saldo acumulado. Lo mueve cada guardado, egreso pagado con la caja de guardado o ajuste del admin. |
@@ -187,11 +220,10 @@ caja del turno.
 
 ## Limitaciones conocidas
 
-- Sin servidor propio, las reglas verifican que el empleado solo toque el campo `stock` y que la venta sea de
-  su turno abierto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
-  exactamente con lo vendido, ni que el total sea la suma de los precios. Esa garantía requiere un
-  servidor (Cloud Functions, que necesitan el plan Blaze).
-- Los ajustes de stock no dejan historial (quién ajustó, cuándo y cuánto).
+- Sin servidor propio, las reglas verifican que cada descuento de stock venga con una venta del mismo empleado
+  que incluye ese producto, pero no pueden recorrer los ítems para comprobar que la cantidad descontada coincida
+  exactamente con lo vendido, ni que el total sea la suma de los precios. Eso lo detecta después el reporte de
+  *Ventas para revisar*.
 - Para abrir la app sin internet, el equipo tiene que haberla abierto antes con internet (así se instala el
   service worker) y el usuario tiene que haber iniciado sesión ahí: sin conexión no se puede iniciar sesión.
   La exportación a Excel sin conexión solo anda si ya se usó antes con internet en ese equipo.

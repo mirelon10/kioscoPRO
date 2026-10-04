@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { redondear, parsearMonto, calcularPrecioVenta, aCentavos } from "../../public/js/lib/dinero.js";
 import { fechaLocalISO, inicioDelDia, finDelDia, aDate } from "../../public/js/lib/fechas.js";
-import { armarVenta, normalizarVenta } from "../../public/js/core/ventas.js";
+import { armarVenta, normalizarVenta, productoIdsDe } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
 import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias, calcularAjusteStock } from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
@@ -11,6 +11,8 @@ import { armarCobro, calcularCajaTurno, calcularVuelto } from "../../public/js/c
 import { conLimiteDeTiempo, esErrorDeConexion, TiempoAgotado } from "../../public/js/lib/espera.js";
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
 import { normalizarEgreso, totalizarEgresos, etiquetaTipoEgreso } from "../../public/js/core/egresos.js";
+import { revisarVentas } from "../../public/js/core/auditoria.js";
+import { validarAlta, generarClave } from "../../public/js/core/usuarios.js";
 
 describe("dinero", () => {
   test("redondea a centavos sin errores de punto flotante", () => {
@@ -396,5 +398,75 @@ describe("egresos: tipo y origen", () => {
     assert.equal(aCentavos(0.29), 29);
     assert.equal(aCentavos(1234.56), 123456);
     assert.equal(aCentavos(0.1 + 0.2), 30);
+  });
+});
+
+describe("productoIdsDe", () => {
+  test("lista cada producto del carrito una sola vez", () => {
+    assert.deepEqual(productoIdsDe([{ productoId: "a" }, { productoId: "b" }, { productoId: "a" }]), ["a", "b"]);
+  });
+});
+
+describe("revisarVentas", () => {
+  const productos = [{ id: "p1", precioCompra: 400 }, { id: "p2", precioCompra: 0 }];
+  const ventaOk = (extra = {}) => ({
+    id: "v1",
+    items: [
+      { productoId: "p1", nombre: "Agua", precio: 600, cantidad: 2, subtotal: 1200 },
+      { productoId: "p2", nombre: "Chicle", precio: 150.5, cantidad: 1, subtotal: 150.5 },
+    ],
+    productoIds: ["p1", "p2"],
+    total: 1350.5,
+    montoRecibido: 2000,
+    vuelto: 649.5,
+    ...extra,
+  });
+
+  test("una venta hecha por la app no se marca", () => {
+    assert.deepEqual(revisarVentas([ventaOk()], productos), []);
+    // Formato anterior: sin productoIds ni pago en efectivo.
+    assert.deepEqual(revisarVentas([ventaOk({ productoIds: undefined, montoRecibido: null, vuelto: null })], productos), []);
+  });
+
+  test("marca un total menor a la suma de los productos", () => {
+    const [r] = revisarVentas([ventaOk({ total: 100, vuelto: 1900 })], productos);
+    assert.equal(r.venta.id, "v1");
+    assert.match(r.problemas.join(" "), /no coincide con la suma/);
+  });
+
+  test("marca subtotales, cantidades y vueltos que no dan", () => {
+    const items = [{ productoId: "p1", nombre: "Agua", precio: 600, cantidad: 2, subtotal: 600 }];
+    assert.match(revisarVentas([ventaOk({ items, productoIds: ["p1"], total: 600, vuelto: 1400 })], productos)[0].problemas.join(" "), /subtotal de Agua/);
+
+    const cero = [{ productoId: "p1", nombre: "Agua", precio: 600, cantidad: 0, subtotal: 0 }];
+    assert.match(revisarVentas([ventaOk({ items: cero, productoIds: ["p1"], total: 0, montoRecibido: null, vuelto: null })], productos)[0].problemas.join(" "), /Cantidad inválida/);
+
+    assert.match(revisarVentas([ventaOk({ vuelto: 900 })], productos)[0].problemas.join(" "), /vuelto no da/);
+  });
+
+  test("marca precios por debajo del costo", () => {
+    const items = [{ productoId: "p1", nombre: "Agua", precio: 1, cantidad: 1, subtotal: 1 }];
+    const [r] = revisarVentas([ventaOk({ items, productoIds: ["p1"], total: 1, montoRecibido: null, vuelto: null })], productos);
+    assert.match(r.problemas.join(" "), /debajo del costo/);
+  });
+
+  test("marca cuando el stock se descontó de otros productos", () => {
+    const [r] = revisarVentas([ventaOk({ productoIds: ["p1"] })], productos);
+    assert.match(r.problemas.join(" "), /no coinciden/);
+  });
+});
+
+describe("usuarios", () => {
+  test("valida el alta: email y rol con acceso", () => {
+    assert.deepEqual(validarAlta({ email: "  Ana@Kiosco.com ", rol: "empleado" }), { email: "ana@kiosco.com", rol: "empleado" });
+    assert.ok(validarAlta({ email: "ana", rol: "empleado" }).error);
+    assert.ok(validarAlta({ email: "ana@kiosco.com", rol: "ninguno" }).error);
+    assert.ok(validarAlta({ email: "ana@kiosco.com", rol: "dueño" }).error);
+  });
+
+  test("genera contraseñas temporales distintas, sin caracteres confusos", () => {
+    const claves = new Set(Array.from({ length: 50 }, () => generarClave()));
+    assert.equal(claves.size, 50);
+    for (const clave of claves) assert.match(clave, /^[a-km-zA-HJ-NP-Z2-9]{10}$/);
   });
 });

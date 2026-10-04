@@ -8,7 +8,15 @@ import {
   terminate,
   clearIndexedDbPersistence,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
-import { getAuth, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import {
+  getAuth,
+  initializeAuth,
+  inMemoryPersistence,
+  connectAuthEmulator,
+  createUserWithEmailAndPassword,
+  signOut,
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app-check.js";
 
 export {
   collection,
@@ -29,12 +37,14 @@ export {
   writeBatch,
   serverTimestamp,
   increment,
+  deleteField,
   waitForPendingWrites,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 export {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
 // La configuración web de Firebase es pública por diseño: la seguridad está en firestore.rules.
@@ -49,11 +59,49 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
+// Desarrollo local contra los emuladores: http://localhost:3000/?emulador
+const enLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
+const usarEmulador = enLocal && new URLSearchParams(location.search).has("emulador");
+
+// ---------- App Check ----------
+// Cada pedido a Firebase lleva un token que prueba que viene de esta app (reCAPTCHA v3) y no de un
+// script que copió la configuración de arriba. Se activa antes que Firestore y Auth.
+// La clave del sitio es pública (como apiKey); la clave secreta queda cargada en la consola de Firebase.
+// Vacía, la app funciona sin App Check (por ejemplo, antes de crear la clave).
+const RECAPTCHA_SITE_KEY = "";
+
+function activarAppCheck(instancia) {
+  if (!RECAPTCHA_SITE_KEY || usarEmulador) return;
+  // En localhost reCAPTCHA no sirve: la consola del navegador muestra un token de depuración que hay
+  // que registrar en Firebase → App Check → Apps → Administrar tokens de depuración.
+  if (enLocal) self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  initializeAppCheck(instancia, { provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+}
+activarAppCheck(app);
+
 // Caché local persistente: el catálogo carga al instante y sobrevive a cortes cortos de internet.
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 export const auth = getAuth(app);
+
+// ---------- Alta de cuentas por el admin ----------
+// Crear una cuenta con el SDK del navegador inicia sesión con ella. Para no cerrar la sesión del admin,
+// se usa una segunda instancia de Firebase que no guarda nada (la sesión nueva vive solo en memoria).
+let authAltas = null;
+
+/** Crea la cuenta en Firebase Auth y devuelve su uid. No cambia la sesión actual. */
+export async function crearCuenta(email, clave) {
+  if (!authAltas) {
+    const appAltas = initializeApp(firebaseConfig, "altas");
+    activarAppCheck(appAltas);
+    authAltas = initializeAuth(appAltas, { persistence: inMemoryPersistence });
+    if (usarEmulador) connectAuthEmulator(authAltas, "http://127.0.0.1:9099", { disableWarnings: true });
+  }
+  const { user } = await createUserWithEmailAndPassword(authAltas, email, clave);
+  await signOut(authAltas);
+  return user.uid;
+}
 
 // ---------- Borrar la copia local al cerrar sesión ----------
 
@@ -154,9 +202,6 @@ export function borrarDatosLocales() {
   return borrando;
 }
 
-// Desarrollo local contra los emuladores: http://localhost:3000/?emulador
-const usarEmulador =
-  ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).has("emulador");
 if (usarEmulador) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });

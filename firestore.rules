@@ -2,7 +2,9 @@ rules_version = '2';
 
 // Todo lo que no esté permitido explícitamente acá queda denegado.
 //
-// Roles: custom claim `rol` ("admin" | "empleado"), asignado con scripts/set-rol.js.
+// Roles ("admin" | "empleado" | "ninguno"): documento usuarios/{uid}, que el admin maneja desde la app.
+// Los usuarios creados antes con scripts/set-rol.js tienen el rol en el token (custom claim) hasta que
+// la app les crea el documento la próxima vez que entran.
 //
 // No hay servidor propio (plan Spark): estas reglas son la única barrera de seguridad.
 service cloud.firestore {
@@ -12,7 +14,10 @@ service cloud.firestore {
 
     function autenticado() { return request.auth != null; }
     function uid() { return request.auth.uid; }
-    function rol() { return request.auth.token.get('rol', ''); }
+    function rutaUsuario(id) { return /databases/$(database)/documents/usuarios/$(id); }
+    function rol() {
+      return exists(rutaUsuario(uid())) ? get(rutaUsuario(uid())).data.rol : request.auth.token.get('rol', '');
+    }
     function esAdmin() { return autenticado() && rol() == 'admin'; }
     function esPersonal() { return autenticado() && rol() in ['admin', 'empleado']; }
 
@@ -42,7 +47,7 @@ service cloud.firestore {
 
     function productoValido(p) {
       return p.keys().hasAll(['nombre', 'precio', 'stock'])
-        && p.keys().hasOnly(['codigo', 'nombre', 'categoria', 'precioCompra', 'margen', 'precio', 'stock'])
+        && p.keys().hasOnly(['codigo', 'nombre', 'categoria', 'precioCompra', 'margen', 'precio', 'stock', 'ultimaVenta', 'ultimoAjuste'])
         && esTexto(p.nombre, 120)
         && esMonto(p.precio)
         && p.stock is int && p.stock >= 0
@@ -52,24 +57,77 @@ service cloud.firestore {
         && p.get('margen', 0) is number && p.get('margen', 0) >= 0 && p.get('margen', 0) <= 10000;
     }
 
-    // El empleado maneja el stock: lo descuenta al cobrar y lo ajusta desde Inventario
-    // (ingreso de mercadería, bajas y conteos). Solo puede tocar el campo stock, nunca precios
-    // ni datos del producto, y nunca dejarlo negativo.
+    // Todo cambio de stock queda explicado en el mismo batch o transacción, y el producto guarda
+    // con qué (ultimaVenta / ultimoAjuste):
+    // - una venta nueva del mismo empleado que incluye el producto (descuento al cobrar), o
+    // - un movimiento nuevo en movimientosStock (ingreso, baja o conteo desde Inventario), que
+    //   registra quién, cuándo, cuánto y por qué, y tiene que coincidir con el cambio.
+    // Nunca puede quedar negativo. Precios y datos del producto los cambia solo el admin.
     // Limitación: las reglas no pueden recorrer los ítems de la venta para verificar que la
-    // cantidad descontada coincida exactamente; para eso haría falta un servidor (plan Blaze).
-    function ajusteDeStock() {
-      return esPersonal()
-        && cambiaSolo(['stock'])
-        && nuevo().stock is int
-        && nuevo().stock >= 0
-        && nuevo().stock <= 1000000;
+    // cantidad descontada coincida exactamente (el reporte de ventas para revisar lo controla).
+    function ventaRef(id) { return /databases/$(database)/documents/ventas/$(id); }
+    function movimientoStockRef(id) { return /databases/$(database)/documents/movimientosStock/$(id); }
+
+    function stockValido() {
+      return nuevo().stock is int && nuevo().stock >= 0 && nuevo().stock <= 1000000;
+    }
+    function stockPorVenta(productoId) {
+      let id = nuevo().ultimaVenta;
+      return cambiaSolo(['stock', 'ultimaVenta'])
+        && id is string
+        && nuevo().stock < resource.data.stock
+        && !exists(ventaRef(id))
+        && getAfter(ventaRef(id)).data.empleadoId == uid()
+        && productoId in getAfter(ventaRef(id)).data.get('productoIds', []);
+    }
+    function stockPorAjuste(productoId) {
+      let id = nuevo().ultimoAjuste;
+      let mov = getAfter(movimientoStockRef(id)).data;
+      return cambiaSolo(['stock', 'ultimoAjuste'])
+        && id is string
+        && !exists(movimientoStockRef(id))
+        && mov.productoId == productoId
+        && mov.empleadoId == uid()
+        && nuevo().stock == resource.data.stock + mov.cambio
+        && (mov.tipo != 'conteo' || nuevo().stock == mov.stockContado);
+    }
+    // El admin edita los datos sin tocar el stock: el stock cambia solo con ventas o ajustes.
+    function edicionDeAdmin() {
+      return esAdmin()
+        && productoValido(nuevo())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stock', 'ultimaVenta', 'ultimoAjuste']);
     }
 
     match /productos/{productoId} {
       allow read: if esPersonal();
-      allow create: if esAdmin() && productoValido(nuevo());
-      allow update: if (esAdmin() && productoValido(nuevo())) || ajusteDeStock();
+      allow create: if esAdmin() && productoValido(nuevo()) && !nuevo().keys().hasAny(['ultimaVenta', 'ultimoAjuste']);
+      allow update: if edicionDeAdmin()
+        || (esPersonal() && stockValido() && (stockPorVenta(productoId) || stockPorAjuste(productoId)));
       allow delete: if esAdmin();
+    }
+
+    match /movimientosStock/{movId} {
+      allow read: if esAdmin() || (esPersonal() && resource.data.empleadoId == uid());
+
+      allow create: if esPersonal()
+        && nuevo().keys().hasAll(['productoId', 'productoNombre', 'tipo', 'cambio', 'motivo', 'empleadoId', 'empleadoNombre', 'fecha'])
+        && nuevo().keys().hasOnly(['productoId', 'productoNombre', 'tipo', 'cambio', 'motivo', 'empleadoId', 'empleadoNombre', 'fecha', 'stockContado'])
+        && nuevo().productoId is string
+        && esTexto(nuevo().productoNombre, 120)
+        && nuevo().tipo in ['ingreso', 'baja', 'conteo']
+        && nuevo().cambio is int && nuevo().cambio != 0
+        && (nuevo().tipo != 'ingreso' || nuevo().cambio > 0)
+        && (nuevo().tipo != 'baja' || nuevo().cambio < 0)
+        && (nuevo().tipo == 'conteo') == ('stockContado' in nuevo())
+        && (!('stockContado' in nuevo()) || (nuevo().stockContado is int && nuevo().stockContado >= 0))
+        && nuevo().motivo is string && nuevo().motivo.size() <= 200
+        && nuevo().empleadoId == uid()
+        && esTexto(nuevo().empleadoNombre, 200)
+        && nuevo().fecha == request.time
+        // El movimiento tiene que ir junto con el cambio de stock que explica.
+        && getAfter(/databases/$(database)/documents/productos/$(nuevo().productoId)).data.get('ultimoAjuste', '') == movId;
+
+      allow update, delete: if false;
     }
 
     // ---------- Turnos ----------
@@ -148,8 +206,10 @@ service cloud.firestore {
 
       allow create: if esPersonal()
         && nuevo().keys().hasAll(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp'])
-        && nuevo().keys().hasOnly(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp', 'montoRecibido', 'vuelto'])
+        && nuevo().keys().hasOnly(['tipo', 'turnoId', 'empleadoId', 'empleadoNombre', 'metodoPago', 'items', 'total', 'timestamp', 'montoRecibido', 'vuelto', 'productoIds'])
         && nuevo().tipo in ['productos', 'sube']
+        // productoIds: los productos vendidos, para que las reglas de productos sepan qué stock puede descontar.
+        && (!('productoIds' in nuevo()) || (nuevo().productoIds is list && nuevo().productoIds.size() <= 100))
         && nuevo().empleadoId == uid()
         && esTexto(nuevo().empleadoNombre, 200)
         && nuevo().metodoPago in ['Efectivo', 'Mercado Pago', 'Tarjeta']
@@ -260,6 +320,34 @@ service cloud.firestore {
         && saldoMovidoPor('guardados', guardadoId);
 
       allow update, delete: if false;
+    }
+
+    // ---------- Usuarios ----------
+    // El admin da de alta la cuenta desde la app (Auth) y acá le asigna el rol. Para quitarle el
+    // acceso a alguien se le pone rol "ninguno" (desde el navegador no se pueden borrar cuentas de Auth).
+
+    match /usuarios/{usuarioId} {
+      allow read: if esAdmin() || (autenticado() && usuarioId == uid());
+
+      allow create: if autenticado()
+        && tieneExactamente(['email', 'rol', 'creadoPor', 'fecha'])
+        && esTexto(nuevo().email, 200)
+        && nuevo().rol in ['admin', 'empleado']
+        && nuevo().creadoPor == uid()
+        && nuevo().fecha == request.time
+        && (esAdmin()
+          // Un usuario de antes (rol en el token) pasa su propio rol a Firestore, sin poder cambiarlo.
+          || (usuarioId == uid() && nuevo().rol == request.auth.token.get('rol', '') && nuevo().email == request.auth.token.email));
+
+      // Nadie se cambia su propio rol: así un admin no se deja sin acceso por error.
+      allow update: if esAdmin()
+        && usuarioId != uid()
+        && cambiaSolo(['rol', 'actualizadoPor', 'actualizado'])
+        && nuevo().rol in ['admin', 'empleado', 'ninguno']
+        && nuevo().actualizadoPor == uid()
+        && nuevo().actualizado == request.time;
+
+      allow delete: if false;
     }
   }
 }
