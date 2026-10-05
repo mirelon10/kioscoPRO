@@ -44,15 +44,20 @@ npx firebase login   # en una terminal propia: el login es interactivo
 ### 2. Usuarios y roles
 
 El admin crea los usuarios desde la sección **Usuarios** de la app: elige email y rol (empleado o
-administrador) y la app genera una contraseña temporal para entregarle. Desde ahí también cambia roles
-o quita el acceso (**Sin acceso**). Nadie puede cambiarse su propio rol.
+administrador) y la app genera una contraseña temporal para entregarle. Al entrar por primera vez, la
+app le pide al usuario que elija su propia contraseña (obligatorio: sin cambiarla no entra). Desde ahí
+el admin también cambia roles, quita el acceso por un tiempo (**Sin acceso**) o elimina al usuario (la
+**X** de la lista). Nadie puede cambiarse su propio rol ni eliminarse.
 
 - El rol vive en `usuarios/{uid}` (Firestore) y las reglas lo leen en cada pedido: un cambio se aplica
   enseguida, y a quien le quitan el acceso la app lo saca.
 - La cuenta se crea con una segunda instancia de Firebase (`crearCuenta` en `firebase.js`) para no cerrar
   la sesión del admin. Por eso el **registro de cuentas tiene que estar habilitado** en Firebase Auth.
   Cualquiera podría crearse una cuenta por la API, pero sin documento en `usuarios` no tiene rol ni acceso.
-- Las cuentas no se pueden borrar desde el navegador: para eso, Firebase Console → Authentication.
+- El navegador no puede borrar la cuenta de otra persona. Eliminar marca el documento (`eliminado: true`,
+  rol `"ninguno"`; no se borra para que no vuelva a valer un rol del token) y la app borra la cuenta de
+  Auth cuando esa persona intenta volver a entrar. Hasta entonces su email sigue ocupado; para liberarlo
+  antes, Firebase Console → Authentication. Un usuario eliminado no se reactiva: se le crea otra cuenta.
 - Usuarios de antes, con el rol en el token (custom claim, `scripts/set-rol.js`): la app les crea el
   documento con ese mismo rol la próxima vez que entran. `set-rol` sigue sirviendo para dar de alta al
   primer admin:
@@ -225,7 +230,7 @@ verificar que sigan iguales. Si el borrado falla, se reintenta la próxima vez q
 |---|---|---|
 | `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock, ultimaVenta, ultimoAjuste` | Admin (sin tocar el stock). El stock cambia solo con una venta o un movimiento, nunca negativo. |
 | `movimientosStock/{id}` | `productoId, productoNombre, tipo ("ingreso"\|"baja"\|"conteo"), cambio, stockContado (conteo), motivo, empleadoId, empleadoNombre, fecha` | Admin o empleado, junto con el cambio de stock. **Inmutables.** |
-| `usuarios/{uid}` | `email, rol ("admin"\|"empleado"\|"ninguno"), creadoPor, fecha` + `actualizadoPor, actualizado` | Admin (nunca su propio rol). Un usuario de antes crea el suyo con el rol de su token. |
+| `usuarios/{uid}` | `email, rol ("admin"\|"empleado"\|"ninguno"), creadoPor, fecha, claveTemporal` + `actualizadoPor, actualizado, eliminado` | Admin (nunca su propio rol; eliminado siempre con rol "ninguno" y sin vuelta atrás). Un usuario de antes crea el suyo con el rol de su token. El propio usuario solo pone `claveTemporal` en false. |
 | `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre, resumen` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
 | `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], productoIds[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |

@@ -3,6 +3,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  deleteUser,
   borrarDatosLocales,
   hayBorradoPendiente,
   esPcCaja,
@@ -12,7 +13,7 @@ import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
 import { mensajeDeError } from "./core/errores.js";
 import { ROLES } from "./core/usuarios.js";
 import { escucharProductos } from "./data/productos.js";
-import { leerRolGuardado, registrarRolPropio, escucharRolPropio } from "./data/usuarios.js";
+import { leerUsuarioGuardado, registrarRolPropio, escucharRolPropio } from "./data/usuarios.js";
 import { escucharSaldoGuardado } from "./data/cajaGuardado.js";
 import { adoptarTurnoSinCandado, escucharTurnoActivo, escucharMovimientosTurno } from "./data/turnos.js";
 import {
@@ -30,7 +31,7 @@ import { iniciarTurno } from "./views/turno.js";
 import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/egresos.js";
 import { iniciarAdmin, reiniciarAdmin, abrirAdmin } from "./views/admin.js";
 import { iniciarStock, renderStock, cargarMovimientosStock } from "./views/stock.js";
-import { iniciarUsuarios, cargarUsuarios } from "./views/usuarios.js";
+import { iniciarUsuarios, cargarUsuarios, pedirClaveNueva } from "./views/usuarios.js";
 
 /** Secciones que solo ve el admin. */
 const SECCIONES_ADMIN = ["sec-admin", "sec-usuarios"];
@@ -39,6 +40,11 @@ const SECCIONES_ADMIN = ["sec-admin", "sec-usuarios"];
 let desuscribir = [];
 /** Se incrementa en cada cambio de sesión para descartar respuestas que lleguen tarde. */
 let generacion = 0;
+/**
+ * Contraseña con la que se acaba de entrar desde el formulario: si es la temporal, sirve para
+ * cambiarla sin volver a pedirla. Se descarta apenas se usa.
+ */
+let claveDelLogin = null;
 
 // ---------- Arranque ----------
 
@@ -91,13 +97,32 @@ onAuthStateChanged(auth, async (usuario) => {
     return mostrarPantalla("login");
   }
 
+  const clave = claveDelLogin;
+  claveDelLogin = null;
+
   try {
-    const rol = await leerRol(usuario);
+    const { rol, claveTemporal, eliminado } = await leerUsuario(usuario);
     if (gen !== generacion) return;
 
+    if (eliminado) {
+      $("login-error").textContent = "Tu usuario fue eliminado del sistema.";
+      // Se borra la cuenta para que el admin pueda volver a usar el email. Si la sesión venía de
+      // antes, Firebase no lo permite: queda para la próxima vez que entre.
+      return deleteUser(usuario).catch(() => signOut(auth));
+    }
     if (!ROLES[rol]) {
       $("login-error").textContent = "Tu usuario no tiene un rol asignado. Pedile al administrador que te habilite.";
       return signOut(auth);
+    }
+
+    if (claveTemporal) {
+      mostrarPantalla("login");
+      const cambiada = await pedirClaveNueva(usuario, clave);
+      if (gen !== generacion) return;
+      if (!cambiada) {
+        $("login-error").textContent = "Para usar el sistema tenés que elegir tu contraseña.";
+        return signOut(auth);
+      }
     }
 
     actualizarSesion({ usuario, rol });
@@ -117,21 +142,22 @@ const ESPERA_TOKEN_MS = 5000;
 const claveRol = (uid) => `kiosco.rol.${uid}`;
 
 /**
- * Lee el rol: primero el de Firestore (usuarios/{uid}, lo maneja el admin desde la app); si el usuario
- * todavía no tiene documento, el del token (usuarios de antes) y le crea el documento con ese rol.
+ * Lee el usuario: primero el documento de Firestore (usuarios/{uid}, lo maneja el admin desde la app);
+ * si todavía no tiene documento, el rol del token (usuarios de antes) y le crea el documento con ese rol.
  * El rol solo decide qué pantallas se ven: los permisos los imponen las reglas.
+ * @returns {Promise<{ rol: string, claveTemporal?: boolean, eliminado?: boolean }>}
  */
-async function leerRol(usuario) {
-  const guardado = await leerRolGuardado(usuario.uid, ESPERA_TOKEN_MS);
+async function leerUsuario(usuario) {
+  const guardado = await leerUsuarioGuardado(usuario.uid, ESPERA_TOKEN_MS);
   if (guardado != null) {
-    recordarRol(usuario.uid, guardado);
+    recordarRol(usuario.uid, guardado.rol);
     return guardado;
   }
   const rol = await leerRolDelToken(usuario);
   if (guardado === undefined && ROLES[rol] && estaOnline()) {
     registrarRolPropio(usuario, rol).catch((error) => console.warn("No se pudo pasar el rol a Firestore", error));
   }
-  return rol;
+  return { rol };
 }
 
 /**
@@ -195,9 +221,11 @@ async function iniciarSesion(e) {
   error.textContent = "";
   boton.disabled = true;
   try {
+    claveDelLogin = password;
     await signInWithEmailAndPassword(auth, email, password);
     $("login-password").value = "";
   } catch (err) {
+    claveDelLogin = null;
     error.textContent = mensajeDeError(err, "No se pudo iniciar sesión.");
   } finally {
     boton.disabled = false;

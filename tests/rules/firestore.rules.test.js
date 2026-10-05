@@ -689,6 +689,48 @@ describe("usuarios y roles", () => {
     await assertFails(deleteDoc(doc(comoAdmin(), "usuarios/carla")));
   });
 
+  test("el alta del admin puede marcar la contraseña como temporal; el usuario de antes, no", async () => {
+    await assertSucceeds(setDoc(doc(comoAdmin(), "usuarios/nuevo1"), { ...usuario("nuevo1@kiosco.test", "empleado"), claveTemporal: true }));
+    await assertFails(setDoc(doc(comoAdmin(), "usuarios/nuevo2"), { ...usuario("nuevo2@kiosco.test", "empleado"), claveTemporal: false }));
+    await assertFails(setDoc(doc(comoAna(), `usuarios/${ANA}`), { ...usuario(`${ANA}@kiosco.test`, "empleado", ANA), claveTemporal: true }));
+  });
+
+  test("solo el propio usuario marca que ya cambió la contraseña temporal", async () => {
+    await sembrar({
+      "usuarios/carla": { email: "carla@kiosco.test", rol: "empleado", claveTemporal: true },
+      "usuarios/dani": { email: "dani@kiosco.test", rol: "empleado", claveTemporal: true },
+    });
+    await assertFails(updateDoc(doc(comoUsuario("carla"), "usuarios/dani"), { claveTemporal: false }));
+    await assertFails(updateDoc(doc(comoUsuario("carla"), "usuarios/carla"), { claveTemporal: false, rol: "admin" }));
+    await assertFails(updateDoc(doc(comoUsuario("carla"), "usuarios/carla"), { claveTemporal: true, email: "otro@kiosco.test" }));
+    await assertSucceeds(updateDoc(doc(comoUsuario("carla"), "usuarios/carla"), { claveTemporal: false }));
+    await assertFails(updateDoc(doc(comoUsuario("carla"), "usuarios/carla"), { claveTemporal: true }));
+  });
+
+  test("el admin elimina a otros (sin acceso y fuera de la lista); no se deshace", async () => {
+    await sembrar({
+      "usuarios/carla": { email: "carla@kiosco.test", rol: "empleado" },
+      "usuarios/dani": { email: "dani@kiosco.test", rol: "admin" },
+      [`usuarios/${ADMIN}`]: { email: "admin@kiosco.test", rol: "admin" },
+    });
+    const baja = (rol = "ninguno", por = ADMIN) => ({ rol, eliminado: true, actualizadoPor: por, actualizado: serverTimestamp() });
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), baja("empleado"))); // eliminado siempre sin acceso
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), { ...baja(), eliminado: "si" }));
+    await assertFails(updateDoc(doc(comoAdmin(), `usuarios/${ADMIN}`), baja()));
+    await assertFails(updateDoc(doc(comoAna(), "usuarios/carla"), baja("ninguno", ANA)));
+    await assertSucceeds(updateDoc(doc(comoAdmin(), "usuarios/carla"), baja()));
+    await assertSucceeds(updateDoc(doc(comoAdmin(), "usuarios/dani"), baja()));
+    // Ya eliminado: no se vuelve a habilitar.
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), { rol: "empleado", eliminado: false, actualizadoPor: ADMIN, actualizado: serverTimestamp() }));
+    await assertFails(updateDoc(doc(comoAdmin(), "usuarios/carla"), { rol: "empleado", actualizadoPor: ADMIN, actualizado: serverTimestamp() }));
+  });
+
+  test("un usuario eliminado con rol en el token sigue sin acceso", async () => {
+    await sembrar({ "productos/p1": producto(), [`usuarios/${ANA}`]: { email: "ana@kiosco.test", rol: "ninguno", eliminado: true } });
+    await assertFails(getDoc(doc(comoAna(), "productos/p1")));
+    await assertFails(setDoc(doc(comoAna(), `usuarios/${ANA}`), usuario(`${ANA}@kiosco.test`, "empleado", ANA)));
+  });
+
   test("cada uno lee su documento; el admin, todos", async () => {
     await sembrar({ [`usuarios/${ANA}`]: { email: "ana@kiosco.test", rol: "empleado" }, [`usuarios/${BETO}`]: { email: "beto@kiosco.test", rol: "empleado" } });
     await assertSucceeds(getDoc(doc(comoAna(), `usuarios/${ANA}`)));

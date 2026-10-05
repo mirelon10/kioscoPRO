@@ -55,13 +55,16 @@ export async function confirmar({ titulo, texto, contenido = null, boton = "Conf
 }
 
 /** Abre un formulario modal. `leer` devuelve los valores o un string con el error de validación. */
-export async function formularioModal({ titulo, contenido, alAbrir, leer, boton = "Guardar" }) {
+/** `obligatorio`: no se cierra con Escape ni tocando afuera, solo con los botones. */
+export async function formularioModal({ titulo, contenido, alAbrir, leer, boton = "Guardar", cancelar = "Cancelar", obligatorio = false }) {
   const { value } = await Swal.fire({
     titleText: titulo,
     html: contenido,
     showCancelButton: true,
     confirmButtonText: boton,
-    cancelButtonText: "Cancelar",
+    cancelButtonText: cancelar,
+    allowOutsideClick: !obligatorio,
+    allowEscapeKey: !obligatorio,
     focusConfirm: false,
     willOpen: (popup) => alAbrir?.(popup), // antes de mostrarse: el formulario nunca se ve vacío
     preConfirm: () => {

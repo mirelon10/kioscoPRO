@@ -12,7 +12,7 @@ import { conLimiteDeTiempo, esErrorDeConexion, TiempoAgotado } from "../../publi
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
 import { normalizarEgreso, totalizarEgresos, etiquetaTipoEgreso } from "../../public/js/core/egresos.js";
 import { revisarVentas } from "../../public/js/core/auditoria.js";
-import { validarAlta, generarClave } from "../../public/js/core/usuarios.js";
+import { validarAlta, generarClave, validarClaveNueva } from "../../public/js/core/usuarios.js";
 
 describe("dinero", () => {
   test("redondea a centavos sin errores de punto flotante", () => {
@@ -506,5 +506,16 @@ describe("usuarios", () => {
     const claves = new Set(Array.from({ length: 50 }, () => generarClave()));
     assert.equal(claves.size, 50);
     for (const clave of claves) assert.match(clave, /^[a-km-zA-HJ-NP-Z2-9]{10}$/);
+  });
+
+  test("valida la contraseña que reemplaza a la temporal", () => {
+    assert.deepEqual(validarClaveNueva({ actual: "Temp2345ab", nueva: "miclave123", repetida: "miclave123" }), {
+      actual: "Temp2345ab",
+      nueva: "miclave123",
+    });
+    assert.ok(validarClaveNueva({ actual: "", nueva: "miclave123", repetida: "miclave123" }).error);
+    assert.ok(validarClaveNueva({ actual: "Temp2345ab", nueva: "corta", repetida: "corta" }).error);
+    assert.ok(validarClaveNueva({ actual: "Temp2345ab", nueva: "Temp2345ab", repetida: "Temp2345ab" }).error);
+    assert.ok(validarClaveNueva({ actual: "Temp2345ab", nueva: "miclave123", repetida: "miclave124" }).error);
   });
 });
