@@ -1,7 +1,14 @@
 import { $, h, icono, filaVacia, mostrar } from "../lib/dom.js";
 import { calcularPrecioVenta, formatearMoneda } from "../lib/dinero.js";
 import { formatearFechaHora } from "../lib/fechas.js";
-import { calcularAjusteStock, construirProducto, MODOS_AJUSTE_STOCK, UMBRAL_STOCK_BAJO } from "../core/productos.js";
+import {
+  calcularAjusteStock,
+  construirProducto,
+  describirMovimiento,
+  CAUSAS_BAJA,
+  MODOS_AJUSTE_STOCK,
+  UMBRAL_STOCK_BAJO,
+} from "../core/productos.js";
 import {
   ajustarStock,
   crearProducto,
@@ -195,6 +202,7 @@ const FORMULARIO_AJUSTE = `
   <div class="swal-form">
     <p id="ajuste-producto" class="text-muted"></p>
     <label>Tipo de ajuste<select id="ajuste-modo" class="swal2-select"></select></label>
+    <label id="ajuste-causa-campo" hidden>¿Por qué?<select id="ajuste-causa" class="swal2-select"></select></label>
     <label><span id="ajuste-etiqueta">Cantidad</span><input id="ajuste-cantidad" type="number" min="0" step="1" class="swal2-input" inputmode="numeric"></label>
     <label>Motivo <small>(opcional)</small><input id="ajuste-motivo" class="swal2-input" maxlength="200" placeholder="Ej: llegó el proveedor, se rompió, vencido"></label>
     <p id="ajuste-resultado" class="ajuste-resultado" aria-live="polite"></p>
@@ -214,8 +222,13 @@ async function ajustar(producto) {
       campo(popup, "modo").replaceChildren(
         ...Object.entries(MODOS_AJUSTE_STOCK).map(([valor, texto]) => h("option", { value: valor }, texto)),
       );
+      campo(popup, "causa").replaceChildren(
+        h("option", { value: "" }, "Elegí la causa…"),
+        ...Object.entries(CAUSAS_BAJA).map(([valor, texto]) => h("option", { value: valor }, texto)),
+      );
       const actualizar = () => {
         const modo = campo(popup, "modo").value;
+        campo(popup, "causa-campo").hidden = modo !== "baja";
         campo(popup, "etiqueta").textContent = modo === "conteo" ? "Unidades contadas" : "Cantidad";
         const { stock, error } = leerAjuste(popup);
         campo(popup, "resultado").textContent =
@@ -228,7 +241,11 @@ async function ajustar(producto) {
     },
     leer: (popup) => {
       const resultado = leerAjuste(popup);
-      return resultado.error ?? { ...resultado, modo: campo(popup, "modo").value, motivo: campo(popup, "motivo").value.trim() };
+      if (resultado.error) return resultado.error;
+      const modo = campo(popup, "modo").value;
+      const causa = modo === "baja" ? campo(popup, "causa").value : null;
+      if (modo === "baja" && !causa) return "Elegí por qué se da de baja: consumo, faltante, rotura o vencido.";
+      return { ...resultado, modo, causa, motivo: campo(popup, "motivo").value.trim() };
     },
   });
   if (!ajuste) return;
@@ -248,8 +265,6 @@ async function ajustar(producto) {
 
 // ---------- Historial de movimientos de stock (admin) ----------
 
-const TIPOS_MOVIMIENTO = { ingreso: "Ingreso", baja: "Baja", conteo: "Conteo" };
-
 export async function cargarMovimientosStock() {
   if (!esAdmin()) return;
   const tbodyMov = $("tabla-movimientos-stock");
@@ -268,7 +283,7 @@ export async function cargarMovimientosStock() {
         {},
         h("td", {}, formatearFechaHora(m.fecha)),
         h("td", {}, m.productoNombre),
-        h("td", {}, TIPOS_MOVIMIENTO[m.tipo] ?? m.tipo, m.tipo === "conteo" ? h("small", { class: "text-muted d-block" }, `contado: ${m.stockContado}`) : null),
+        h("td", {}, describirMovimiento(m), m.tipo === "conteo" ? h("small", { class: "text-muted d-block" }, `contado: ${m.stockContado}`) : null),
         h("td", { class: `num ${m.cambio < 0 ? "text-danger" : "text-success"}` }, `${m.cambio > 0 ? "+" : ""}${m.cambio}`),
         h("td", {}, m.motivo || "-"),
         h("td", {}, m.empleadoNombre),

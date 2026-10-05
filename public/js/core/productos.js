@@ -70,9 +70,56 @@ export function productosConStockBajo(productos, umbral = UMBRAL_STOCK_BAJO) {
 /** Formas de ajustar el stock desde Inventario (las usan el admin y el empleado). */
 export const MODOS_AJUSTE_STOCK = {
   ingreso: "Ingreso de mercadería (+)",
-  baja: "Baja: rotura, vencido, consumo (−)",
+  baja: "Baja: consumo, faltante, rotura, vencido (−)",
   conteo: "Conteo: el stock real es",
 };
+
+/** Por qué se da de baja stock (sin ser una venta). Lo ve el admin en Administración. */
+export const CAUSAS_BAJA = {
+  consumo: "Consumo propio",
+  faltante: "Faltante / pérdida",
+  rotura: "Rotura",
+  vencido: "Vencido",
+};
+
+/** Qué pasó en un movimiento de stock, para mostrarlo en las tablas. */
+export function describirMovimiento(m) {
+  if (m.tipo === "baja") return CAUSAS_BAJA[m.causa] ?? "Baja";
+  if (m.tipo === "conteo") return m.cambio < 0 ? "Faltante en conteo" : m.cambio > 0 ? "Sobrante en conteo" : "Conteo";
+  if (m.tipo === "ingreso") return "Ingreso";
+  return m.tipo;
+}
+
+/**
+ * Stock que bajó sin ser una venta (bajas y conteos que dieron de menos), del más nuevo al más viejo,
+ * con su valor al costo actual del producto. `empleadoId` vacío: todos.
+ * @returns {{ filas: object[], unidades: number, valor: number, porEmpleado: { nombre, unidades, valor }[] }}
+ */
+export function resumirBajasDeStock(movimientos, productos, empleadoId = "") {
+  const costo = new Map(productos.map((p) => [p.id, p.precioCompra]));
+  const filas = movimientos
+    .filter((m) => m.cambio < 0 && (!empleadoId || m.empleadoId === empleadoId))
+    .map((m) => {
+      const unidades = -m.cambio;
+      const precio = costo.get(m.productoId);
+      return { ...m, unidades, que: describirMovimiento(m), valor: precio == null ? null : precio * unidades };
+    });
+
+  const porEmpleado = new Map();
+  for (const f of filas) {
+    const e = porEmpleado.get(f.empleadoId) ?? { nombre: f.empleadoNombre, unidades: 0, valor: 0 };
+    e.unidades += f.unidades;
+    e.valor += f.valor ?? 0;
+    porEmpleado.set(f.empleadoId, e);
+  }
+
+  return {
+    filas,
+    unidades: filas.reduce((s, f) => s + f.unidades, 0),
+    valor: filas.reduce((s, f) => s + (f.valor ?? 0), 0),
+    porEmpleado: [...porEmpleado.values()].sort((a, b) => b.valor - a.valor),
+  };
+}
 
 /**
  * Valida un ajuste de stock.

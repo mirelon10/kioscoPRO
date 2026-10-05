@@ -4,7 +4,8 @@ import { aDate, fechaLocalISO, finDelDia, formatearFechaHora, inicioDelDia } fro
 import { calcularResumen, empleadosDeTurnos } from "../core/resumen.js";
 import { calcularCajaTurno } from "../core/caja.js";
 import { armarExcelResumen } from "../core/exportacion.js";
-import { productosConStockBajo } from "../core/productos.js";
+import { productosConStockBajo, resumirBajasDeStock } from "../core/productos.js";
+import { obtenerMovimientosStockEntre } from "../data/productos.js";
 import { revisarVentas } from "../core/auditoria.js";
 import { contarVentas, obtenerMovimientos, obtenerVentas } from "../data/reportes.js";
 import { cerrarTurno, guardarResumenTurno, obtenerMovimientosTurno, obtenerVentasTurno } from "../data/turnos.js";
@@ -99,9 +100,19 @@ async function cargarResumen() {
   if (rango.desde > rango.hasta) return avisar("Fechas inválidas", "La fecha desde es posterior a la fecha hasta.");
 
   try {
-    movimientos = { ...(await obtenerMovimientos(rango.desde, rango.hasta)), ...rango };
+    const [caja, movimientosStock] = await Promise.all([
+      obtenerMovimientos(rango.desde, rango.hasta),
+      // Si falla, el resumen de caja se muestra igual y la tabla de consumos avisa.
+      obtenerMovimientosStockEntre(rango.desde, rango.hasta).catch((error) => {
+        console.error("No se pudieron cargar los movimientos de stock", error);
+        return null;
+      }),
+    ]);
+    movimientos = { ...caja, movimientosStock, ...rango };
     ventasRevisadas = null;
-    renderOpcionesEmpleado(empleadosDeTurnos(movimientos.turnos));
+    // Los movimientos de stock tienen empleadoId/empleadoNombre como los turnos: así se puede filtrar
+    // también por alguien que dio de baja stock sin abrir turno (por ejemplo, un admin).
+    renderOpcionesEmpleado(empleadosDeTurnos([...movimientos.turnos, ...(movimientosStock ?? [])]));
     renderResumen();
     guardarResumenesFaltantes();
   } catch (error) {
@@ -159,9 +170,49 @@ function renderResumen() {
   mostrar(avisoPendientes, r.turnosPendientes > 0);
 
   renderTurnos(r.turnos);
+  renderBajasStock();
   renderVentasParaRevisar();
   btnExcel.disabled = false;
   btnRevisar.disabled = false;
+}
+
+// ---------- Consumos y faltantes de stock ----------
+
+function renderBajasStock() {
+  const tbody = $("tabla-bajas-stock");
+  const totales = $("bajas-stock-totales");
+  if (!movimientos.movimientosStock) {
+    totales.textContent = "";
+    return filaVacia(tbody, 7, "No se pudieron cargar los movimientos de stock. Volvé a filtrar para reintentar.");
+  }
+
+  const r = resumirBajasDeStock(movimientos.movimientosStock, sesion.productos, selectEmpleado.value);
+  if (r.filas.length === 0) {
+    totales.textContent = "";
+    return filaVacia(tbody, 7, "No hubo consumos ni faltantes en el período.");
+  }
+
+  totales.replaceChildren(
+    h("strong", {}, `${r.unidades} ${r.unidades === 1 ? "unidad" : "unidades"} · ${formatearMoneda(r.valor)} al costo`),
+    r.porEmpleado.length > 1
+      ? h("small", { class: "text-muted d-block" }, r.porEmpleado.map((e) => `${e.nombre}: ${e.unidades} (${formatearMoneda(e.valor)})`).join(" · "))
+      : null,
+  );
+  tbody.replaceChildren(
+    ...r.filas.map((f) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, formatearFechaHora(f.fecha)),
+        h("td", {}, f.empleadoNombre),
+        h("td", {}, h("span", { class: "badge" }, f.que)),
+        h("td", {}, f.productoNombre),
+        h("td", { class: "num text-danger" }, f.unidades),
+        h("td", { class: "num" }, f.valor == null ? "—" : formatearMoneda(f.valor)),
+        h("td", {}, f.motivo || "-"),
+      ),
+    ),
+  );
 }
 
 // ---------- Ventas para revisar ----------

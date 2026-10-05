@@ -209,6 +209,7 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 /* Modal de edición de producto */
 .swal-form { display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .swal-form label { font-size: 0.85rem; color: var(--text-muted); display: flex; flex-direction: column; }
+.swal-form [hidden] { display: none; }
 .swal-form .swal2-input { margin: 4px 0 0; width: 100%; }
 .swal-fila { display: flex; gap: 10px; }
 .swal-fila label { flex: 1; }

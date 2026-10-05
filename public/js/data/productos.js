@@ -8,6 +8,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   writeBatch,
@@ -52,7 +53,7 @@ export function guardarProducto(id, { stock, ...datos }) {
  * esa venta. Si el resultado quedara negativo, las reglas lo rechazan.
  * El conteo fija el número contado (si el stock cambió mientras tanto, las reglas lo rechazan).
  */
-export function ajustarStock(producto, { modo, cambio, stock, motivo }, usuario) {
+export function ajustarStock(producto, { modo, cambio, stock, motivo, causa }, usuario) {
   const movRef = doc(movimientosCol);
   const batch = writeBatch(db);
   batch.set(movRef, {
@@ -65,6 +66,7 @@ export function ajustarStock(producto, { modo, cambio, stock, motivo }, usuario)
     empleadoNombre: usuario.email,
     fecha: serverTimestamp(),
     ...(modo === "conteo" ? { stockContado: stock } : {}),
+    ...(modo === "baja" && causa ? { causa } : {}),
   });
   batch.update(doc(productosCol, producto.id), {
     stock: modo === "conteo" ? stock : increment(cambio),
@@ -76,6 +78,14 @@ export function ajustarStock(producto, { modo, cambio, stock, motivo }, usuario)
 /** Últimos movimientos de stock (para el admin). */
 export async function obtenerMovimientosStock(cantidad = 100) {
   const snap = await getDocs(query(movimientosCol, orderBy("fecha", "desc"), limit(cantidad)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/** Movimientos de stock de un período (para el panel del admin): pocos, 1 lectura cada uno. */
+export async function obtenerMovimientosStockEntre(desde, hasta) {
+  const snap = await getDocs(
+    query(movimientosCol, where("fecha", ">=", desde), where("fecha", "<=", hasta), orderBy("fecha", "desc")),
+  );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
