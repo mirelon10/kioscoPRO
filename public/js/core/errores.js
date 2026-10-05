@@ -19,6 +19,8 @@ const MENSAJES_FIREBASE = {
   "auth/user-disabled": "Este usuario está deshabilitado.",
   "auth/too-many-requests": "Demasiados intentos. Esperá unos minutos.",
   "auth/network-request-failed": "Sin conexión. Revisá internet.",
+  "auth/weak-password": "La contraseña es muy débil: usá una más larga.",
+  "auth/password-does-not-meet-requirements": "La contraseña no cumple los requisitos: usá una más larga, con letras y números.",
 };
 
 export function mensajeDeError(error, porDefecto = "Ocurrió un error inesperado.") {

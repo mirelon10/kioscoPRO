@@ -11,6 +11,19 @@ export function validarAlta({ email, rol }) {
   return { email: limpio, rol };
 }
 
+export const LARGO_MINIMO_CLAVE = 8;
+
+/** Contraseña que elige el usuario para reemplazar la temporal. */
+export function validarClaveNueva({ actual, nueva, repetida }) {
+  if (!actual) return { error: "Ingresá la contraseña temporal que te dieron." };
+  if (String(nueva ?? "").length < LARGO_MINIMO_CLAVE) {
+    return { error: `La contraseña nueva tiene que tener al menos ${LARGO_MINIMO_CLAVE} caracteres.` };
+  }
+  if (nueva === actual) return { error: "La contraseña nueva tiene que ser distinta de la temporal." };
+  if (nueva !== repetida) return { error: "Las dos contraseñas nuevas no coinciden." };
+  return { actual, nueva };
+}
+
 // Sin letras ni números que se confundan al dictarlos (0/O, 1/l/I).
 const ALFABETO = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 

@@ -46,6 +46,10 @@ export {
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  deleteUser,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
 // La configuración web de Firebase es pública por diseño: la seguridad está en firestore.rules.

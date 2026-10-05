@@ -347,27 +347,45 @@ service cloud.firestore {
     // ---------- Usuarios ----------
     // El admin da de alta la cuenta desde la app (Auth) y acá le asigna el rol. Para quitarle el
     // acceso a alguien se le pone rol "ninguno" (desde el navegador no se pueden borrar cuentas de Auth).
+    //
+    // claveTemporal: la cuenta la creó el admin con una contraseña temporal; la app le pide al usuario
+    // que la cambie al entrar y después la pone en false (solo el propio usuario).
+    //
+    // eliminado: el admin lo saca de la lista. El documento no se borra: sin documento volvería a valer
+    // el rol del token (usuarios de antes). Siempre va con rol "ninguno". La cuenta de Auth la borra la
+    // app la próxima vez que esa persona intenta entrar.
 
     match /usuarios/{usuarioId} {
       allow read: if esAdmin() || (autenticado() && usuarioId == uid());
 
       allow create: if autenticado()
-        && tieneExactamente(['email', 'rol', 'creadoPor', 'fecha'])
+        && nuevo().keys().hasAll(['email', 'rol', 'creadoPor', 'fecha'])
+        && nuevo().keys().hasOnly(['email', 'rol', 'creadoPor', 'fecha', 'claveTemporal'])
         && esTexto(nuevo().email, 200)
         && nuevo().rol in ['admin', 'empleado']
         && nuevo().creadoPor == uid()
         && nuevo().fecha == request.time
-        && (esAdmin()
+        && ((esAdmin() && nuevo().get('claveTemporal', true) == true)
           // Un usuario de antes (rol en el token) pasa su propio rol a Firestore, sin poder cambiarlo.
-          || (usuarioId == uid() && nuevo().rol == request.auth.token.get('rol', '') && nuevo().email == request.auth.token.email));
+          || (usuarioId == uid() && !('claveTemporal' in nuevo())
+            && nuevo().rol == request.auth.token.get('rol', '') && nuevo().email == request.auth.token.email));
 
       // Nadie se cambia su propio rol: así un admin no se deja sin acceso por error.
-      allow update: if esAdmin()
+      // Un usuario eliminado no se vuelve a habilitar (se le crea una cuenta nueva).
+      allow update: if (esAdmin()
         && usuarioId != uid()
-        && cambiaSolo(['rol', 'actualizadoPor', 'actualizado'])
+        && resource.data.get('eliminado', false) == false
+        && cambiaSolo(['rol', 'actualizadoPor', 'actualizado', 'eliminado'])
         && nuevo().rol in ['admin', 'empleado', 'ninguno']
+        && nuevo().get('eliminado', false) is bool
+        && (nuevo().get('eliminado', false) == false || nuevo().rol == 'ninguno')
         && nuevo().actualizadoPor == uid()
-        && nuevo().actualizado == request.time;
+        && nuevo().actualizado == request.time)
+        // El usuario ya cambió su contraseña temporal.
+        || (autenticado()
+          && usuarioId == uid()
+          && cambiaSolo(['claveTemporal'])
+          && nuevo().claveTemporal == false);
 
       allow delete: if false;
     }
