@@ -5,6 +5,7 @@ import {
   signOut,
   borrarDatosLocales,
   hayBorradoPendiente,
+  esPcCaja,
   contarEscriturasSinSubir,
 } from "./firebase.js";
 import { $, mostrar, etiquetarTablasParaCelular } from "./lib/dom.js";
@@ -221,8 +222,10 @@ async function cerrarSesion() {
   } catch (error) {
     return mostrarError(error);
   }
-  // PC compartida: que no queden en el navegador los datos de quien salió.
   olvidarRol(uid);
+  // PC de la caja: se conserva la copia local (ver esPcCaja). La recarga deja la pantalla limpia igual.
+  if (esPcCaja()) return location.reload();
+  // PC compartida: que no queden en el navegador los datos de quien salió.
   await borrarDatosLocales();
 }
 

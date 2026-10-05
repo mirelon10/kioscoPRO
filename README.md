@@ -207,6 +207,11 @@ sirven desde la copia. Si el token de la sesión ya venció (dura 1 hora), se us
 equipo; los permisos igual los imponen las reglas al subir. Al agregar un archivo a `public/` hay que sumarlo
 a `ARCHIVOS_APP` en `sw.js`: `tests/unit/sw.test.js` falla si falta.
 
+**PC de la caja** (*Administración → Este equipo*): en la PC fija del kiosco, el admin marca que no se borre la
+copia local al salir. El siguiente empleado no vuelve a bajar el catálogo entero: si entra dentro de los 30
+minutos, Firestore cobra solo los productos que cambiaron (unas 2.000 lecturas menos por cambio de turno).
+Se guarda en el `localStorage` de ese navegador. La página se recarga igual al salir, así no queda nada en pantalla.
+
 **Cerrar sesión en una PC compartida** ([`firebase.js`](public/js/firebase.js)): al salir se borra la copia
 local de Firestore (catálogo, ventas, turnos, egresos) y el rol recordado, y la página se recarga, así no
 quedan en el navegador los datos de quien salió. Nunca se borran movimientos sin subir: antes de salir se

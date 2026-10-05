@@ -104,6 +104,31 @@ export async function crearCuenta(email, clave) {
   return user.uid;
 }
 
+// ---------- PC de la caja ----------
+// En la PC fija del kiosco, la copia local no se borra al salir: así el siguiente empleado no vuelve
+// a bajar el catálogo entero (Firestore cobra solo lo que cambió si se vuelve a escuchar dentro de
+// los 30 minutos). Lo marca el admin desde Administración, y vale solo para este navegador.
+
+const CLAVE_PC_CAJA = "kiosco.pcCaja";
+
+export function esPcCaja() {
+  try {
+    return localStorage.getItem(CLAVE_PC_CAJA) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function marcarPcCaja(activa) {
+  try {
+    if (activa) localStorage.setItem(CLAVE_PC_CAJA, "1");
+    else localStorage.removeItem(CLAVE_PC_CAJA);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Borrar la copia local al cerrar sesión ----------
 
 const CLAVE_BORRADO_PENDIENTE = "kiosco.borrarDatosLocales";
