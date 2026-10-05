@@ -1,4 +1,84 @@
 {
   "indexes": [],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "turnoId",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "empleadoId",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "timestamp",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "items",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "productoIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "tipo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "empleadoNombre",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "metodoPago",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "total",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "montoRecibido",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ventas",
+      "fieldPath": "vuelto",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "turnos",
+      "fieldPath": "resumen",
+      "indexes": []
+    }
+  ]
 }

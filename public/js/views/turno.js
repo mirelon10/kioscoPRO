@@ -143,8 +143,7 @@ async function alCerrar() {
   });
   if (!ok) return;
 
-  // Si los egresos superaron al efectivo, en el cajón no queda nada (no puede ser negativo).
-  const pendiente = await cerrarTurno(sesion.turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
+  const pendiente = await cerrarTurno(sesion.turno, caja, sesion.usuario);
   mostrarDetalle({
     titulo: pendiente ? "Turno cerrado sin conexión (se sube al volver internet)" : "Turno cerrado",
     contenido: desgloseCierre(caja),

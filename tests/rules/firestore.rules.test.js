@@ -303,6 +303,37 @@ describe("turnos", () => {
     await assertSucceeds(batch.commit());
   });
 
+  const resumen = (extra = {}) => ({
+    efectivo: 1500, mercadoPago: 0, tarjeta: 200, sube: 100, totalVentas: 1800,
+    egresos: 300, guardado: 0, total: 500, cantidadVentas: 4, ...extra,
+  });
+
+  test("al cerrar se guarda el resumen, que tiene que tener el formato exacto", async () => {
+    await abrirTurno(comoAna(), ANA, "t1");
+    await assertFails(cerrarTurno(comoAna(), ANA, ANA, "t1", { resumen: resumen({ efectivo: -1 }) }));
+    await assertFails(cerrarTurno(comoAna(), ANA, ANA, "t1", { resumen: resumen({ extra: 1 }) }));
+    await assertFails(cerrarTurno(comoAna(), ANA, ANA, "t1", { resumen: resumen({ cantidadVentas: 1.5 }) }));
+    await assertFails(cerrarTurno(comoAna(), ANA, ANA, "t1", { resumen: "1800" }));
+    // el total puede ser negativo (turno sin ventas: menos la caja inicial)
+    await assertSucceeds(cerrarTurno(comoAna(), ANA, ANA, "t1", { resumen: resumen({ total: -500 }) }));
+  });
+
+  test("a un turno cerrado sin resumen solo el admin se lo agrega, una vez", async () => {
+    await abrirTurno(comoAna(), ANA);
+    await cerrarTurno(comoAna(), ANA, ANA);
+    const ruta = `turnos/turno-${ANA}`;
+    await assertFails(updateDoc(doc(comoAna(), ruta), { resumen: resumen() }));
+    await assertFails(updateDoc(doc(comoAdmin(), ruta), { resumen: resumen({ total: "x" }) }));
+    await assertFails(updateDoc(doc(comoAdmin(), ruta), { resumen: resumen(), cajaFinal: 0 }));
+    await assertSucceeds(updateDoc(doc(comoAdmin(), ruta), { resumen: resumen() }));
+    await assertFails(updateDoc(doc(comoAdmin(), ruta), { resumen: resumen({ total: 0 }) }));
+  });
+
+  test("al turno abierto no se le agrega el resumen sin cerrarlo", async () => {
+    await abrirTurno(comoAna(), ANA);
+    await assertFails(updateDoc(doc(comoAdmin(), `turnos/turno-${ANA}`), { resumen: resumen() }));
+  });
+
   test("un turno cerrado no se reabre ni se modifica", async () => {
     await abrirTurno(comoAna(), ANA);
     await cerrarTurno(comoAna(), ANA, ANA);

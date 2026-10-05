@@ -6,8 +6,8 @@ import { calcularCajaTurno } from "../core/caja.js";
 import { armarExcelResumen } from "../core/exportacion.js";
 import { productosConStockBajo } from "../core/productos.js";
 import { revisarVentas } from "../core/auditoria.js";
-import { obtenerMovimientos } from "../data/reportes.js";
-import { cerrarTurno, obtenerMovimientosTurno } from "../data/turnos.js";
+import { contarVentas, obtenerMovimientos, obtenerVentas } from "../data/reportes.js";
+import { cerrarTurno, guardarResumenTurno, obtenerMovimientosTurno, obtenerVentasTurno } from "../data/turnos.js";
 import { estaOnline } from "../data/conexion.js";
 import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
@@ -17,9 +17,12 @@ import { desgloseCierre } from "./desglose.js";
 
 const selectEmpleado = $("admin-empleado");
 const btnExcel = $("btn-exportar-excel");
+const btnRevisar = $("btn-revisar-ventas");
 
 /** Último período consultado: cambiar de empleado filtra sin volver a leer Firestore. */
 let movimientos = null;
+/** Ventas del período, si el admin pidió revisarlas (se leen a pedido: son miles). */
+let ventasRevisadas = null;
 
 export function iniciarAdmin() {
   $("form-filtro-admin").addEventListener("submit", (e) => {
@@ -28,10 +31,13 @@ export function iniciarAdmin() {
   });
   selectEmpleado.addEventListener("change", renderResumen);
   btnExcel.addEventListener("click", () => conBoton(btnExcel, exportarExcel));
+  btnRevisar.addEventListener("click", () => conBoton(btnRevisar, revisarVentasDelPeriodo));
 
   $("tabla-turnos").addEventListener("click", (e) => {
-    const boton = e.target.closest("button[data-cerrar-turno]");
-    if (boton) conBoton(boton, () => cerrarTurnoDesdeAdmin(boton.dataset.cerrarTurno));
+    const cerrar = e.target.closest("button[data-cerrar-turno]");
+    if (cerrar) conBoton(cerrar, () => cerrarTurnoDesdeAdmin(cerrar.dataset.cerrarTurno));
+    const calcular = e.target.closest("button[data-calcular-turno]");
+    if (calcular) conBoton(calcular, () => calcularTurno(calcular.dataset.calcularTurno));
   });
 
   const btnAjustar = $("btn-ajustar-saldo");
@@ -49,7 +55,9 @@ export function reiniciarAdmin() {
   $("admin-hasta").value = hoy;
   selectEmpleado.replaceChildren(h("option", { value: "" }, "Todos los empleados"));
   movimientos = null;
+  ventasRevisadas = null;
   btnExcel.disabled = true;
+  btnRevisar.disabled = true;
 }
 
 export function abrirAdmin() {
@@ -82,10 +90,25 @@ async function cargarResumen() {
 
   try {
     movimientos = { ...(await obtenerMovimientos(rango.desde, rango.hasta)), ...rango };
+    ventasRevisadas = null;
     renderOpcionesEmpleado(empleadosDeTurnos(movimientos.turnos));
     renderResumen();
+    guardarResumenesFaltantes();
   } catch (error) {
     mostrarError(error, "No se pudo cargar el resumen.");
+  }
+}
+
+/**
+ * Turnos cerrados antes de que se guardara el resumen: se calcularon con sus ventas y se les
+ * guarda el resumen, así la próxima consulta no vuelve a leerlas.
+ */
+function guardarResumenesFaltantes() {
+  if (!esAdmin() || movimientos.sinResumen.length === 0) return;
+  const filas = calcularResumen(movimientos).turnos;
+  for (const t of movimientos.sinResumen) {
+    const caja = filas.find((f) => f.id === t.id)?.caja;
+    if (caja) guardarResumenTurno(t.id, caja).catch((error) => console.warn("No se pudo guardar el resumen del turno", t.id, error));
   }
 }
 
@@ -118,15 +141,51 @@ function renderResumen() {
   $("metric-guardado").textContent = formatearMoneda(r.totalGuardado);
   $("metric-neto").textContent = formatearMoneda(r.neto);
 
+  const avisoPendientes = $("admin-aviso-pendientes");
+  avisoPendientes.textContent =
+    r.turnosPendientes === 1
+      ? "Hay 1 turno abierto que no está incluido en los totales: tocá «Calcular» en la tabla de turnos."
+      : `Hay ${r.turnosPendientes} turnos abiertos que no están incluidos en los totales: tocá «Calcular» en la tabla de turnos.`;
+  mostrar(avisoPendientes, r.turnosPendientes > 0);
+
   renderTurnos(r.turnos);
   renderVentasParaRevisar();
   btnExcel.disabled = false;
+  btnRevisar.disabled = false;
+}
+
+// ---------- Ventas para revisar ----------
+// Revisarlas implica leer cada venta del período (1 lectura por venta): se hace solo a pedido,
+// avisando antes cuántas son.
+
+async function revisarVentasDelPeriodo() {
+  if (!movimientos) return;
+  const { desde, hasta } = movimientos;
+  const cantidad = await contarVentas(desde, hasta);
+  if (cantidad === 0) {
+    ventasRevisadas = [];
+    return renderVentasParaRevisar();
+  }
+
+  const ok = await confirmar({
+    titulo: "¿Revisar las ventas del período?",
+    texto:
+      `Son ${cantidad.toLocaleString("es-AR")} ventas. Revisarlas usa ${cantidad.toLocaleString("es-AR")} lecturas de las 50.000 gratuitas por día. ` +
+      "Conviene revisar de a un día.",
+    boton: "Revisar",
+  });
+  if (!ok) return;
+
+  ventasRevisadas = await obtenerVentas(desde, hasta);
+  renderVentasParaRevisar();
 }
 
 function renderVentasParaRevisar() {
   const tbody = $("tabla-ventas-revisar");
+  if (!ventasRevisadas) return filaVacia(tbody, 4, "Tocá «Revisar ventas» para controlar las ventas del período.");
+
   const empleadoId = selectEmpleado.value;
-  const ventas = movimientos.ventas.filter((v) => {
+  const ventas = ventasRevisadas.filter((v) => {
     const fecha = aDate(v.timestamp);
     return (!empleadoId || v.empleadoId === empleadoId) && fecha != null && fecha >= movimientos.desde && fecha <= movimientos.hasta;
   });
@@ -147,6 +206,8 @@ function renderVentasParaRevisar() {
   );
 }
 
+const monto = (valor) => (valor == null ? "—" : formatearMoneda(valor));
+
 function renderTurnos(filas) {
   const tbody = $("tabla-turnos");
   if (filas.length === 0) return filaVacia(tbody, 13, "No hay turnos en el período.");
@@ -159,6 +220,14 @@ function renderTurnos(filas) {
       const celdaAcciones = h(
         "td",
         { class: "acciones" },
+        t.pendiente
+          ? h(
+              "button",
+              { type: "button", class: "btn btn-secondary btn-sm", dataset: { calcularTurno: t.id }, "aria-label": `Calcular la caja del turno de ${t.empleado}` },
+              icono("calculator"),
+              " Calcular",
+            )
+          : null,
         t.abierto
           ? h(
               "button",
@@ -175,18 +244,28 @@ function renderTurnos(filas) {
         h("td", {}, formatearFechaHora(t.apertura)),
         celdaCierre,
         h("td", { class: "num" }, formatearMoneda(t.cajaInicial)),
-        h("td", { class: "num" }, formatearMoneda(t.efectivo)),
-        h("td", { class: "num" }, formatearMoneda(t.mercadoPago)),
-        h("td", { class: "num" }, formatearMoneda(t.tarjeta)),
-        h("td", { class: "num" }, formatearMoneda(t.sube)),
-        h("td", { class: "num" }, h("strong", {}, formatearMoneda(t.totalVentas))),
-        h("td", { class: "num" }, formatearMoneda(t.egresos)),
-        h("td", { class: "num" }, formatearMoneda(t.guardado)),
-        h("td", { class: "num" }, h("strong", {}, formatearMoneda(t.total))),
+        h("td", { class: "num" }, monto(t.efectivo)),
+        h("td", { class: "num" }, monto(t.mercadoPago)),
+        h("td", { class: "num" }, monto(t.tarjeta)),
+        h("td", { class: "num" }, monto(t.sube)),
+        h("td", { class: "num" }, h("strong", {}, monto(t.totalVentas))),
+        h("td", { class: "num" }, monto(t.egresos)),
+        h("td", { class: "num" }, monto(t.guardado)),
+        h("td", { class: "num" }, h("strong", {}, monto(t.total))),
         celdaAcciones,
       );
     }),
   );
+}
+
+/** Turno abierto: lee sus ventas (1 lectura por venta) y lo suma a los totales. */
+async function calcularTurno(turnoId) {
+  const turno = movimientos?.turnos.find((t) => t.id === turnoId);
+  if (!turno) return;
+  const ventas = await obtenerVentasTurno(turno);
+  movimientos.ventas = [...movimientos.ventas.filter((v) => v.turnoId !== turnoId), ...ventas];
+  movimientos.turnosCalculados.add(turnoId);
+  renderResumen();
 }
 
 // ---------- Caja de guardado ----------
@@ -259,7 +338,7 @@ async function cerrarTurnoDesdeAdmin(turnoId) {
   });
   if (!ok) return;
 
-  await cerrarTurno(turno, Math.max(0, caja.efectivoEnCaja), sesion.usuario);
+  await cerrarTurno(turno, caja, sesion.usuario);
   mostrarDetalle({ titulo: "Turno cerrado", contenido: desgloseCierre(caja) });
   await cargarResumen();
 }

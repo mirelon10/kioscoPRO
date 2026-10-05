@@ -24,6 +24,7 @@ export {
   getDoc,
   getDocFromCache,
   getDocs,
+  getCountFromServer,
   setDoc,
   updateDoc,
   addDoc,

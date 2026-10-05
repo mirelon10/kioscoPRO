@@ -51,6 +51,39 @@ export function calcularCajaTurno({ cajaInicial, ventas, egresos, guardados = []
   };
 }
 
+/**
+ * Resumen que se guarda en el turno al cerrarlo (turnos/{id}.resumen). Con él, el panel del admin
+ * no vuelve a leer las ventas del turno: con miles de ventas por día, leerlas en cada consulta
+ * agotaría la cuota diaria gratuita de lecturas.
+ */
+export function resumenDeCaja(caja) {
+  return {
+    efectivo: caja.porMetodo["Efectivo"],
+    mercadoPago: caja.porMetodo["Mercado Pago"],
+    tarjeta: caja.porMetodo["Tarjeta"],
+    sube: caja.sube,
+    totalVentas: caja.totalVentas,
+    egresos: caja.egresos,
+    guardado: caja.guardado,
+    total: caja.total,
+    cantidadVentas: caja.cantidadVentas,
+  };
+}
+
+/** Caja de un turno cerrado a partir de su resumen guardado (el inverso de resumenDeCaja). */
+export function cajaDesdeResumen(cajaInicial, r) {
+  return {
+    porMetodo: { Efectivo: r.efectivo, "Mercado Pago": r.mercadoPago, Tarjeta: r.tarjeta },
+    sube: r.sube,
+    totalVentas: r.totalVentas,
+    cajaInicial: Number(cajaInicial) || 0,
+    egresos: r.egresos,
+    guardado: r.guardado,
+    total: r.total,
+    cantidadVentas: r.cantidadVentas,
+  };
+}
+
 /** Vuelto de un pago en efectivo. `falta` > 0 si el cliente no entregó suficiente. */
 export function calcularVuelto(total, montoRecibido) {
   const recibido = Number(montoRecibido);

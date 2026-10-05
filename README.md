@@ -23,7 +23,7 @@ public/                  ← lo que publica Netlify
     data/                ← acceso a Firestore
     views/               ← una vista por sección: pos, turno, egresos, admin, stock, usuarios (+ desglose del cierre)
 firestore.rules          ← seguridad (la parte más importante)
-firestore.indexes.json   ← índices compuestos
+firestore.indexes.json   ← índices (y campos de las ventas que no se indexan, para ahorrar espacio)
 netlify.toml             ← publicación y cabeceras de seguridad (CSP)
 scripts/set-rol.js       ← asigna roles a los usuarios
 tests/unit/              ← tests de la lógica de negocio
@@ -126,7 +126,8 @@ Efectivo + Mercado Pago + Tarjeta (ventas de productos) + Recargas SUBE
 Las recargas SUBE van en su propia línea (no se suman de nuevo en el método con que se cobraron). Al cerrar
 no se cuenta la plata: se confirma con el detalle a la vista y después se muestra el resumen. En `cajaFinal`
 se registra el efectivo que debería quedar en el cajón (caja inicial + todo lo cobrado en efectivo − egresos
-− guardado). El desglose no se guarda: el panel lo recalcula siempre desde los movimientos del turno.
+− guardado). Al cerrar también se guarda el **resumen** del cierre (`resumen`: totales por método, SUBE, egresos,
+guardado, total y cantidad de ventas), que es lo que usa el panel del admin (ver *Cuota gratuita*).
 
 **Caja de guardado:** durante el turno, el empleado pasa efectivo de la caja a la caja de guardado (debajo del
 cierre, en *Caja y turnos*). No puede guardar más efectivo del que hay en el cajón. Cada guardado queda
@@ -151,7 +152,22 @@ En *Inventario* ve los últimos 100 movimientos.
 **Ventas para revisar** ([`core/auditoria.js`](public/js/core/auditoria.js)): en *Administración*, las ventas del
 período con datos que no cierran: total distinto de la suma de los productos, subtotales o vueltos mal
 calculados, precios por debajo del costo actual o stock descontado de otros productos. La app nunca las genera:
-son la señal de una venta cargada por fuera del sistema.
+son la señal de una venta cargada por fuera del sistema. Se revisan a pedido (botón *Revisar ventas*): la app
+cuenta antes las ventas del período y avisa cuántas lecturas va a usar.
+
+**Cuota gratuita** (plan Spark: 50.000 lecturas y 20.000 escrituras por día, 1 GiB guardado). Pensado para unas
+3.000 ventas por día:
+
+- **Resumen por turno.** El panel del admin lee los turnos del período con su `resumen`, y los egresos y
+  guardados (pocos), pero no las ventas: un mes son unas 90 lecturas en lugar de unas 90.000. Los turnos
+  abiertos no tienen resumen: aparecen sin montos, fuera de los totales, con un botón *Calcular* que lee sus
+  ventas. A los turnos cerrados antes de este cambio el admin les guarda el resumen la primera vez que los
+  consulta (las reglas lo permiten una sola vez). El período son los turnos **abiertos** entre las dos fechas,
+  cada uno completo aunque pase la medianoche.
+- **Índices.** Firestore indexa todos los campos de cada documento, y en las ventas eso ocupa más que la venta
+  misma (sobre todo la lista de productos). `firestore.indexes.json` deja indexados solo `turnoId`,
+  `empleadoId` y `timestamp`, los que usan las consultas. Si una consulta nueva filtra u ordena las ventas
+  por otro campo, hay que volver a indexarlo ahí.
 
 **Turno abierto al cerrar la pestaña:** el navegador pregunta si salir (su propio cartel, el texto no se puede
 cambiar) y, si la persona se queda, la app la lleva a *Caja y turnos*. Algunos navegadores de celular no
@@ -205,7 +221,7 @@ verificar que sigan iguales. Si el borrado falla, se reintenta la próxima vez q
 | `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock, ultimaVenta, ultimoAjuste` | Admin (sin tocar el stock). El stock cambia solo con una venta o un movimiento, nunca negativo. |
 | `movimientosStock/{id}` | `productoId, productoNombre, tipo ("ingreso"\|"baja"\|"conteo"), cambio, stockContado (conteo), motivo, empleadoId, empleadoNombre, fecha` | Admin o empleado, junto con el cambio de stock. **Inmutables.** |
 | `usuarios/{uid}` | `email, rol ("admin"\|"empleado"\|"ninguno"), creadoPor, fecha` + `actualizadoPor, actualizado` | Admin (nunca su propio rol). Un usuario de antes crea el suyo con el rol de su token. |
-| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre` | Abre el empleado; cierra él mismo o un admin. |
+| `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre, resumen` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |
 | `ventas/{id}` | `tipo ("productos"\|"sube"), turnoId, empleadoId, empleadoNombre, metodoPago, items[], productoIds[], total, montoRecibido, vuelto, timestamp` | Empleado con turno abierto. En efectivo, `montoRecibido ≥ total`; si no, ambos en `null`. **Inmutables.** |
 | `egresos/{id}` | `turnoId, empleadoId, empleadoNombre, monto, motivo, tipo ("fijo"\|"variable"), origen ("caja"\|"guardado"), fecha` | Empleado con turno abierto. Con origen `guardado`, junto con el saldo. **Inmutables.** |

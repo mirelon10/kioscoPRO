@@ -7,7 +7,7 @@ import { armarVenta, normalizarVenta, productoIdsDe } from "../../public/js/core
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
 import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias, calcularAjusteStock } from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
-import { armarCobro, calcularCajaTurno, calcularVuelto } from "../../public/js/core/caja.js";
+import { armarCobro, cajaDesdeResumen, calcularCajaTurno, calcularVuelto, resumenDeCaja } from "../../public/js/core/caja.js";
 import { conLimiteDeTiempo, esErrorDeConexion, TiempoAgotado } from "../../public/js/lib/espera.js";
 import { armarExcelResumen } from "../../public/js/core/exportacion.js";
 import { normalizarEgreso, totalizarEgresos, etiquetaTipoEgreso } from "../../public/js/core/egresos.js";
@@ -197,11 +197,33 @@ describe("calcularResumen", () => {
     assert.equal(r.turnos.length, 1);
   });
 
-  test("las ventas fuera del rango no suman a los totales pero sí a la caja de su turno", () => {
+  test("un turno suma completo al período en que se abrió, aunque pase la medianoche", () => {
     const tarde = { turnoId: "t1", empleadoId: "e1", tipo: "productos", metodoPago: "Efectivo", total: 50, timestamp: { toDate: () => new Date(2026, 9, 2, 0, 30) } };
     const r = calcularResumen({ turnos, ventas: [...ventas, tarde], egresos, desde, hasta });
-    assert.equal(r.porMetodo["Efectivo"], 1500);
+    assert.equal(r.porMetodo["Efectivo"], 1550);
     assert.equal(r.turnos[0].efectivo, 1550);
+  });
+
+  test("un turno cerrado con resumen guardado no necesita sus ventas", () => {
+    const caja = calcularCajaTurno({ cajaInicial: 1000, ventas: ventas.filter((v) => v.turnoId === "t1"), egresos, guardados });
+    const conResumen = [{ ...turnos[0], resumen: resumenDeCaja(caja) }, turnos[1]];
+    const r = calcularResumen({ turnos: conResumen, ventas: ventas.filter((v) => v.turnoId === "t2"), egresos, guardados, desde, hasta });
+    // La caja de cada fila se compara sin efectivoEnCaja, que no va en el resumen (es cajaFinal).
+    const sinCaja = ({ turnos, ...resto }) => ({ ...resto, turnos: turnos.map(({ caja, ...fila }) => fila) });
+    assert.deepEqual(sinCaja(r), sinCaja(calcularResumen({ turnos, ventas, egresos, guardados, desde, hasta })));
+  });
+
+  test("un turno sin resumen ni ventas cargadas queda pendiente y no suma a los totales", () => {
+    const r = calcularResumen({ turnos, ventas: [], egresos, guardados, desde, hasta, turnosCalculados: new Set() });
+    assert.equal(r.turnosPendientes, 2);
+    assert.equal(r.totalVentas, 0);
+    assert.equal(r.totalEgresos, 0); // los egresos del turno pendiente tampoco
+    assert.equal(r.turnos[0].pendiente, true);
+    assert.equal(r.turnos[0].total, null);
+
+    const t2 = calcularResumen({ turnos, ventas, egresos, guardados, desde, hasta, turnosCalculados: new Set(["t2"]) });
+    assert.equal(t2.turnosPendientes, 1);
+    assert.equal(t2.totalVentas, 2000);
   });
 
   test("lista empleados únicos ordenados", () => {
@@ -244,6 +266,20 @@ describe("calcularCajaTurno", () => {
       efectivoEnCaja: 1350.3, // 1000 + 1500,1 + 200,2 (SUBE en efectivo) − 350 − 1000
       cantidadVentas: 4,
     });
+  });
+
+  test("el resumen guardado al cerrar reconstruye la misma caja (salvo el efectivo en el cajón, que va en cajaFinal)", () => {
+    const caja = calcularCajaTurno({
+      cajaInicial: 1000,
+      ventas: [{ metodoPago: "Efectivo", total: 1500.1 }, { tipo: "sube", metodoPago: "Mercado Pago", total: 500 }],
+      egresos: [{ monto: 300 }],
+      guardados: [{ monto: 100 }],
+    });
+    const { efectivoEnCaja, ...resto } = caja;
+    assert.deepEqual(cajaDesdeResumen(1000, resumenDeCaja(caja)), resto);
+    assert.deepEqual(Object.keys(resumenDeCaja(caja)).sort(), [
+      "cantidadVentas", "efectivo", "egresos", "guardado", "mercadoPago", "sube", "tarjeta", "total", "totalVentas",
+    ]);
   });
 
   test("turno sin movimientos: el total es menos la caja inicial y en el cajón queda la inicial", () => {
@@ -341,6 +377,8 @@ describe("armarExcelResumen", () => {
     assert.deepEqual(res.filas[2], ["Empleado", "ana@k.com"]);
     assert.deepEqual(turnos.filas[1].slice(3), ["Cerrado", 1000, 2100, 500, 0, 500, 3100, 301, 200, 1599, "admin@k.com"]);
     assert.deepEqual(turnos.filas[2].slice(2, 4), ["", "Abierto"]);
+    const pendiente = { ...resumen, turnos: [{ ...resumen.turnos[1], pendiente: true }] };
+    assert.equal(armarExcelResumen(pendiente, { desde, hasta }).hojas[1].filas[1][3], "Abierto (sin calcular)");
     assert.deepEqual(egresos.filas[1], [desde, "ana@k.com", "Proveedor", "Sin clasificar", "Caja", 301]);
     assert.deepEqual(res.filas.find((f) => f[0] === "  Costos variables"), ["  Costos variables", 101]);
   });
@@ -380,12 +418,12 @@ describe("egresos: tipo y origen", () => {
     assert.equal(caja.efectivoEnCaja, 2900); // 1000 + 3000 − 1100
   });
 
-  test("el resumen del admin suma todos los egresos del período, con su detalle", () => {
+  test("el resumen del admin suma todos los egresos de los turnos del período, con su detalle", () => {
     const ts = { toDate: () => new Date(2026, 9, 1, 12) };
     const r = calcularResumen({
-      turnos: [],
+      turnos: [{ id: "t1", empleadoId: "e1", cajaInicial: 0, estado: "cerrado", fechaApertura: ts }],
       ventas: [],
-      egresos: lista.map((e) => ({ ...e, fecha: ts })),
+      egresos: lista.map((e) => ({ ...e, turnoId: "t1", empleadoId: "e1", fecha: ts })),
       desde: new Date(2026, 9, 1),
       hasta: new Date(2026, 9, 1, 23, 59),
     });

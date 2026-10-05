@@ -6,6 +6,7 @@ import {
   getDocFromCache,
   getDocs,
   setDoc,
+  updateDoc,
   query,
   where,
   limit,
@@ -14,6 +15,7 @@ import {
   serverTimestamp,
 } from "../firebase.js";
 import { ErrorNegocio } from "../core/errores.js";
+import { resumenDeCaja } from "../core/caja.js";
 import { esperarConfirmacion, estaOnline } from "./conexion.js";
 
 const turnosCol = collection(db, "turnos");
@@ -99,20 +101,22 @@ export async function abrirTurno(usuario, cajaInicial) {
 
 /**
  * Cierra un turno guardando quién lo cerró, y libera el candado.
- * `efectivoEnCaja` (cajaFinal) es el efectivo que queda en el cajón según el sistema.
+ * `caja` es el cierre calculado (calcularCajaTurno): se guarda su resumen, para que el panel del
+ * admin no tenga que volver a leer las ventas, y en cajaFinal el efectivo que queda en el cajón
+ * (nunca negativo: si los egresos superaron al efectivo, no queda nada).
  * El admin puede cerrar el turno de otro empleado (las reglas lo verifican).
- * El desglose no se guarda: el panel lo recalcula siempre desde los movimientos del turno.
  *
  * Sin conexión el cierre queda pendiente. Firestore sube las escrituras en orden, así que el
  * cierre llega después de las ventas y egresos hechos antes sin conexión (si llegara primero,
  * las reglas las rechazarían por turno cerrado).
  * @returns {Promise<boolean>} true si quedó pendiente de subir
  */
-export async function cerrarTurno(turno, efectivoEnCaja, usuario) {
+export async function cerrarTurno(turno, caja, usuario) {
   const batch = writeBatch(db);
   batch.update(doc(turnosCol, turno.id), {
     estado: "cerrado",
-    cajaFinal: efectivoEnCaja,
+    cajaFinal: Math.max(0, caja.efectivoEnCaja),
+    resumen: resumenDeCaja(caja),
     fechaCierre: serverTimestamp(),
     cerradoPor: usuario.uid,
     cerradoPorNombre: usuario.email,
@@ -149,6 +153,22 @@ export function escucharMovimientosTurno(turno, alCambiar, alFallar) {
     dejarEgresos();
     dejarGuardados();
   };
+}
+
+/**
+ * Turno cerrado antes de que se guardara el resumen: el admin se lo agrega la primera vez que lo
+ * calcula, así no se vuelven a leer sus ventas.
+ */
+export function guardarResumenTurno(turnoId, caja) {
+  return updateDoc(doc(turnosCol, turnoId), { resumen: resumenDeCaja(caja) });
+}
+
+/** Consulta de las ventas de un turno. */
+export const consultaVentasTurno = (turno) => delTurno("ventas", turno);
+
+/** Ventas de un turno (lectura única): 1 lectura por venta. */
+export async function obtenerVentasTurno(turno) {
+  return datosDe(await getDocs(consultaVentasTurno(turno)));
 }
 
 /** Lectura única, para que el admin vea la caja de un turno ajeno antes de cerrarlo. */

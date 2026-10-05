@@ -52,7 +52,7 @@ export function armarExcelResumen(resumen, { desde, hasta, empleado = "Todos los
         t.empleado,
         t.apertura ?? "",
         t.cierre ?? "",
-        t.abierto ? "Abierto" : "Cerrado",
+        (t.abierto ? "Abierto" : "Cerrado") + (t.pendiente ? " (sin calcular)" : ""),
         t.cajaInicial,
         t.efectivo,
         t.mercadoPago,
