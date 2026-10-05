@@ -5,7 +5,15 @@ import { redondear, parsearMonto, calcularPrecioVenta, aCentavos } from "../../p
 import { fechaLocalISO, inicioDelDia, finDelDia, aDate } from "../../public/js/lib/fechas.js";
 import { armarVenta, normalizarVenta, productoIdsDe } from "../../public/js/core/ventas.js";
 import { ErrorNegocio, mensajeDeError } from "../../public/js/core/errores.js";
-import { construirProducto, normalizarProducto, buscarExacto, buscarCoincidencias, calcularAjusteStock } from "../../public/js/core/productos.js";
+import {
+  construirProducto,
+  normalizarProducto,
+  buscarExacto,
+  buscarCoincidencias,
+  calcularAjusteStock,
+  describirMovimiento,
+  resumirBajasDeStock,
+} from "../../public/js/core/productos.js";
 import { calcularResumen, empleadosDeTurnos } from "../../public/js/core/resumen.js";
 import { armarCobro, cajaDesdeResumen, calcularCajaTurno, calcularVuelto, resumenDeCaja } from "../../public/js/core/caja.js";
 import { conLimiteDeTiempo, esErrorDeConexion, TiempoAgotado } from "../../public/js/lib/espera.js";
@@ -125,6 +133,43 @@ describe("productos", () => {
     const lista = [normalizarProducto("1", { nombre: "123", codigo: "" }), normalizarProducto("2", { nombre: "Agua", codigo: "123" })];
     assert.equal(buscarExacto(lista, "123").id, "2");
     assert.equal(buscarCoincidencias(lista, "agu").length, 1);
+  });
+});
+
+describe("consumos y faltantes de stock", () => {
+  const mov = (extra) => ({ productoId: "p1", productoNombre: "Agua", empleadoId: "ana", empleadoNombre: "ana@k.com", ...extra });
+  const productos = [{ id: "p1", precioCompra: 400 }];
+
+  test("describe qué pasó en cada movimiento", () => {
+    assert.equal(describirMovimiento({ tipo: "baja", causa: "consumo", cambio: -1 }), "Consumo propio");
+    assert.equal(describirMovimiento({ tipo: "baja", causa: "faltante", cambio: -1 }), "Faltante / pérdida");
+    assert.equal(describirMovimiento({ tipo: "baja", cambio: -1 }), "Baja"); // formato anterior
+    assert.equal(describirMovimiento({ tipo: "conteo", cambio: -2 }), "Faltante en conteo");
+    assert.equal(describirMovimiento({ tipo: "conteo", cambio: 3 }), "Sobrante en conteo");
+    assert.equal(describirMovimiento({ tipo: "ingreso", cambio: 5 }), "Ingreso");
+  });
+
+  test("junta solo lo que bajó sin ser venta, con su valor al costo y por empleado", () => {
+    const movimientos = [
+      mov({ tipo: "baja", causa: "consumo", cambio: -2 }),
+      mov({ tipo: "ingreso", cambio: 10 }),
+      mov({ tipo: "conteo", cambio: -1, empleadoId: "beto", empleadoNombre: "beto@k.com" }),
+      mov({ tipo: "conteo", cambio: 4 }),
+      mov({ tipo: "baja", causa: "vencido", cambio: -1, productoId: "borrado" }),
+    ];
+    const r = resumirBajasDeStock(movimientos, productos);
+    assert.equal(r.filas.length, 3);
+    assert.equal(r.unidades, 4);
+    assert.equal(r.valor, 1200); // el producto borrado no tiene costo
+    assert.equal(r.filas[2].valor, null);
+    assert.deepEqual(r.porEmpleado, [
+      { nombre: "ana@k.com", unidades: 3, valor: 800 },
+      { nombre: "beto@k.com", unidades: 1, valor: 400 },
+    ]);
+
+    const soloBeto = resumirBajasDeStock(movimientos, productos, "beto");
+    assert.equal(soloBeto.filas.length, 1);
+    assert.equal(soloBeto.filas[0].que, "Faltante en conteo");
   });
 });
 

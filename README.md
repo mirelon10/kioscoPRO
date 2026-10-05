@@ -144,9 +144,13 @@ verifican que el saldo cambie exactamente en ese monto y nunca quede negativo. E
 (conteo de la caja, retiro del dueño) desde *Administración*; el ajuste queda registrado con motivo y autor.
 
 **Inventario:** sección para todos los usuarios. El admin da de alta, edita y borra productos. El empleado ve
-el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja por rotura o
-vencimiento (−) o conteo (fija el número contado), con un motivo opcional. Ingresos y bajas usan `increment()`,
-así no pisan una venta que entre mientras el modal está abierto.
+el catálogo (sin el costo) y ajusta el stock con *Stock*: ingreso de mercadería (+), baja (−) con su causa
+obligatoria (consumo propio, faltante / pérdida, rotura o vencido) o conteo (fija el número contado), con un
+motivo opcional. Ingresos y bajas usan `increment()`, así no pisan una venta que entre mientras el modal está abierto.
+
+**Consumos y faltantes** (Administración): para el período y empleado filtrados, el admin ve quién consumió,
+reportó un faltante, rompió o tuvo vencido qué producto, y los conteos que dieron de menos, con el valor al
+costo actual y el total por persona. Lee los movimientos de stock del período (pocos: 1 lectura cada uno).
 
 **Movimientos de stock:** todo cambio de stock queda explicado. Cada ajuste se guarda en `movimientosStock`
 en el mismo batch que el cambio (quién, cuándo, cuánto, motivo), y cada descuento por venta va junto con la venta
@@ -229,7 +233,7 @@ verificar que sigan iguales. Si el borrado falla, se reintenta la próxima vez q
 | Colección | Documento | Quién escribe |
 |---|---|---|
 | `productos/{id}` | `codigo, nombre, categoria, precioCompra, margen, precio, stock, ultimaVenta, ultimoAjuste` | Admin (sin tocar el stock). El stock cambia solo con una venta o un movimiento, nunca negativo. |
-| `movimientosStock/{id}` | `productoId, productoNombre, tipo ("ingreso"\|"baja"\|"conteo"), cambio, stockContado (conteo), motivo, empleadoId, empleadoNombre, fecha` | Admin o empleado, junto con el cambio de stock. **Inmutables.** |
+| `movimientosStock/{id}` | `productoId, productoNombre, tipo ("ingreso"\|"baja"\|"conteo"), cambio, stockContado (conteo), causa (baja: "consumo"\|"faltante"\|"rotura"\|"vencido"), motivo, empleadoId, empleadoNombre, fecha` | Admin o empleado, junto con el cambio de stock. **Inmutables.** |
 | `usuarios/{uid}` | `email, rol ("admin"\|"empleado"\|"ninguno"), creadoPor, fecha, claveTemporal` + `actualizadoPor, actualizado, eliminado` | Admin (nunca su propio rol; eliminado siempre con rol "ninguno" y sin vuelta atrás). Un usuario de antes crea el suyo con el rol de su token. El propio usuario solo pone `claveTemporal` en false. |
 | `turnos/{id}` | `empleadoId, empleadoNombre, cajaInicial, estado, fechaApertura` + al cerrar: `cajaFinal` (contado), `fechaCierre, cerradoPor, cerradoPorNombre, resumen` | Abre el empleado; cierra él mismo o un admin. |
 | `turnosActivos/{uid}` | `turnoId` | Candado: **un solo turno abierto** por empleado. Se crea y se borra en el mismo batch que abre y cierra el turno. |

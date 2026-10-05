@@ -345,6 +345,19 @@
         </div>
 
         <div class="card mb-4">
+          <h4><i class="fa-solid fa-box-open" aria-hidden="true"></i> Consumos y faltantes de stock</h4>
+          <p class="text-muted mb-3">Stock que bajó en el período sin ser una venta: lo que alguien consumió, reportó como faltante,
+            se rompió o venció, y los conteos que dieron de menos. El valor es al costo actual del producto.</p>
+          <p id="bajas-stock-totales" class="mb-3"></p>
+          <div class="tabla-scroll">
+            <table class="table-modern">
+              <thead><tr><th>Fecha</th><th>Quién</th><th>Qué pasó</th><th>Producto</th><th class="num">Unidades</th><th class="num">Valor</th><th>Motivo</th></tr></thead>
+              <tbody id="tabla-bajas-stock"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card mb-4">
           <h4><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Ventas para revisar</h4>
           <p class="text-muted mb-3">Ventas del período con datos que no cierran (totales, subtotales, vueltos, precios por debajo del costo
             o stock descontado de otros productos). La app no las genera sola: pueden ser ventas cargadas por fuera del sistema.

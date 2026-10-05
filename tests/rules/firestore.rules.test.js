@@ -211,6 +211,24 @@ describe("productos", () => {
     await assertFails(ajustarStock(fs, ANA, "p1", { tipo: "ingreso", cambio: 1, movId: "m9" }));
   });
 
+  test("una baja lleva su causa (consumo, faltante, rotura, vencido); los demás tipos no", async () => {
+    await sembrar({ "productos/p1": producto({ stock: 10 }) });
+    const fs = comoAna();
+    let n = 0;
+    const baja = (tipo, cambio, extra) => {
+      const movId = `causa-${++n}`;
+      const batch = writeBatch(fs);
+      batch.set(doc(fs, "movimientosStock", movId), movimientoStock(ANA, "p1", tipo, cambio, extra));
+      batch.update(doc(fs, "productos/p1"), { stock: increment(cambio), ultimoAjuste: movId });
+      return batch.commit();
+    };
+    await assertSucceeds(baja("baja", -1, { causa: "consumo" }));
+    await assertSucceeds(baja("baja", -1, { causa: "faltante" }));
+    await assertSucceeds(baja("baja", -1)); // formato anterior, sin causa
+    await assertFails(baja("baja", -1, { causa: "regalo" }));
+    await assertFails(baja("ingreso", 1, { causa: "consumo" }));
+  });
+
   test("los movimientos de stock son inmutables; el empleado ve los suyos y el admin todos", async () => {
     await sembrar({ "productos/p1": producto({ stock: 5 }) });
     await ajustarStock(comoAna(), ANA, "p1", { tipo: "ingreso", cambio: 2, movId: "m1" });

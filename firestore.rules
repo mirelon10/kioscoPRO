@@ -111,7 +111,9 @@ service cloud.firestore {
 
       allow create: if esPersonal()
         && nuevo().keys().hasAll(['productoId', 'productoNombre', 'tipo', 'cambio', 'motivo', 'empleadoId', 'empleadoNombre', 'fecha'])
-        && nuevo().keys().hasOnly(['productoId', 'productoNombre', 'tipo', 'cambio', 'motivo', 'empleadoId', 'empleadoNombre', 'fecha', 'stockContado'])
+        && nuevo().keys().hasOnly(['productoId', 'productoNombre', 'tipo', 'cambio', 'motivo', 'empleadoId', 'empleadoNombre', 'fecha', 'stockContado', 'causa'])
+        // causa: por qué se dio de baja (opcional para seguir aceptando el formato anterior).
+        && (!('causa' in nuevo()) || (nuevo().tipo == 'baja' && nuevo().causa in ['consumo', 'faltante', 'rotura', 'vencido']))
         && nuevo().productoId is string
         && esTexto(nuevo().productoNombre, 120)
         && nuevo().tipo in ['ingreso', 'baja', 'conteo']
