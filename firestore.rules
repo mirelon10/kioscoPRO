@@ -144,6 +144,20 @@ service cloud.firestore {
         || getAfter(turnoActivo(empleadoId)).data.turnoId != turnoId;
     }
 
+    // Resumen del cierre (core/caja.js → resumenDeCaja): el panel del admin lo usa en lugar de releer
+    // las ventas del turno. Lo calcula la app, igual que cajaFinal; si hay dudas sobre un turno, el
+    // admin puede revisar sus ventas (Ventas para revisar).
+    function esImporte(v) { return v is number && v >= 0 && v <= 1000000000000; }
+    function resumenValido(r) {
+      return r is map
+        && r.keys().hasAll(['efectivo', 'mercadoPago', 'tarjeta', 'sube', 'totalVentas', 'egresos', 'guardado', 'total', 'cantidadVentas'])
+        && r.keys().hasOnly(['efectivo', 'mercadoPago', 'tarjeta', 'sube', 'totalVentas', 'egresos', 'guardado', 'total', 'cantidadVentas'])
+        && esImporte(r.efectivo) && esImporte(r.mercadoPago) && esImporte(r.tarjeta) && esImporte(r.sube)
+        && esImporte(r.totalVentas) && esImporte(r.egresos) && esImporte(r.guardado)
+        && r.total is number && r.total >= -1000000000000 && r.total <= 1000000000000
+        && r.cantidadVentas is int && r.cantidadVentas >= 0;
+    }
+
     match /turnos/{turnoId} {
       // resource == null: la app empieza a escuchar el turno recién abierto antes de que llegue al
       // servidor. Leer un documento inexistente no expone datos.
@@ -158,16 +172,24 @@ service cloud.firestore {
         && nuevo().fechaApertura == request.time
         && getAfter(turnoActivo(uid())).data.turnoId == turnoId;
 
-      allow update: if puedeCerrar(resource.data.empleadoId)
+      allow update: if (puedeCerrar(resource.data.empleadoId)
         && resource.data.estado == 'abierto'
-        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre', 'cerradoPor', 'cerradoPorNombre'])
+        && cambiaSolo(['estado', 'cajaFinal', 'fechaCierre', 'cerradoPor', 'cerradoPorNombre', 'resumen'])
+        // resumen es opcional para seguir aceptando el formato anterior.
+        && (!('resumen' in nuevo()) || resumenValido(nuevo().resumen))
         && nuevo().estado == 'cerrado'
         && esMonto(nuevo().cajaFinal)
         && nuevo().fechaCierre == request.time
         // cerradoPor es opcional para seguir aceptando el formato anterior, pero nunca falsificable.
         && nuevo().get('cerradoPor', uid()) == uid()
         && (!('cerradoPorNombre' in nuevo()) || esTexto(nuevo().cerradoPorNombre, 200))
-        && candadoLiberado(resource.data.empleadoId, turnoId);
+        && candadoLiberado(resource.data.empleadoId, turnoId))
+        // Turno cerrado antes de que existiera el resumen: el admin se lo agrega una sola vez.
+        || (esAdmin()
+          && resource.data.estado == 'cerrado'
+          && !('resumen' in resource.data)
+          && cambiaSolo(['resumen'])
+          && resumenValido(nuevo().resumen));
 
       allow delete: if false;
     }

@@ -138,6 +138,7 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 .alert-banner i { font-size: 1.5rem; margin-top: 3px; }
 .alert-banner ul { margin-left: 20px; margin-top: 5px; list-style-type: square; }
 .alert-banner li { font-size: 0.95rem; }
+.aviso-pendientes { background-color: #fef3c7; border-left: 5px solid #f59e0b; padding: 10px 15px; border-radius: 8px; color: #92400e; }
 .lista-problemas { margin: 0; padding-left: 18px; color: #991b1b; font-size: 0.9rem; }
 
 /* Usuarios */
