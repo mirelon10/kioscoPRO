@@ -279,6 +279,8 @@ body { background-color: var(--bg-app); color: var(--text-main); height: 100vh; 
 .total-detalle { text-align: right; margin-top: 4px; font-size: 0.85rem; }
 .stat-detalle { margin-top: 6px; font-size: 0.8rem; color: var(--text-muted); }
 .saldo-guardado { color: #0369a1; }
+.check-pc-caja { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; font-weight: 600; cursor: pointer; }
+.check-pc-caja input { width: 18px; height: 18px; }
 .saldo-guardado-card { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; border-left: 5px solid #0284c7; }
 .saldo-guardado-card > div { flex: 1; min-width: 220px; }
 .saldo-guardado-card h4 { color: var(--dark); margin-bottom: 4px; }

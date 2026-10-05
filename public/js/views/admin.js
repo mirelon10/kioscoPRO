@@ -13,6 +13,7 @@ import { descargarExcel } from "../lib/excel.js";
 import { sesion, alCambiarSesion, esAdmin } from "../estado.js";
 import { avisar, confirmar, conBoton, formularioModal, mostrarDetalle, mostrarError, notificarExito } from "../ui.js";
 import { ajustarSaldoGuardado } from "../data/cajaGuardado.js";
+import { esPcCaja, marcarPcCaja } from "../firebase.js";
 import { desgloseCierre } from "./desglose.js";
 
 const selectEmpleado = $("admin-empleado");
@@ -43,6 +44,14 @@ export function iniciarAdmin() {
   const btnAjustar = $("btn-ajustar-saldo");
   btnAjustar.addEventListener("click", () => conBoton(btnAjustar, ajustarSaldo));
 
+  $("pc-caja").addEventListener("change", (e) => {
+    if (!marcarPcCaja(e.target.checked)) {
+      e.target.checked = esPcCaja();
+      return avisar("No se pudo guardar", "Este navegador no deja guardar la configuración.");
+    }
+    notificarExito(e.target.checked ? "Esta PC conserva el catálogo al salir" : "Esta PC borra sus datos al salir");
+  });
+
   alCambiarSesion((_, cambios) => {
     if ("productos" in cambios) renderAlertasStock();
     if ("saldoGuardado" in cambios) renderSaldoGuardado();
@@ -61,6 +70,7 @@ export function reiniciarAdmin() {
 }
 
 export function abrirAdmin() {
+  $("pc-caja").checked = esPcCaja();
   renderAlertasStock();
   renderSaldoGuardado();
   cargarResumen();
