@@ -33,18 +33,58 @@ export function iniciarInstalacion() {
   mostrarBotones(true);
 }
 
+/** El navegador avisa que se puede instalar unos segundos después de abrir la página. */
+async function esperarPedido(ms) {
+  for (let t = 0; !pedidoInstalacion && t < ms; t += 200) await new Promise((r) => setTimeout(r, 200));
+  return pedidoInstalacion;
+}
+
+/** Chrome y Edge dicen si la app ya está instalada en este equipo (ver related_applications del manifest). */
+async function estaInstaladaEnEsteEquipo() {
+  try {
+    return (await navigator.getInstalledRelatedApps?.())?.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function instalar() {
-  if (pedidoInstalacion) {
-    const pedido = pedidoInstalacion;
+  const pedido = pedidoInstalacion ?? (await esperarPedido(3000));
+  if (pedido) {
     pedidoInstalacion = null; // el navegador permite usarlo una sola vez
     await pedido.prompt();
+    const { outcome } = await pedido.userChoice;
+    if (outcome === "dismissed") {
+      mostrarDetalle({
+        titulo: "No se instaló",
+        icono: "info",
+        contenido: h("p", {}, "Para intentar de nuevo, recargá la página y tocá \"Instalar app\"."),
+      });
+    }
     return;
   }
-  const { titulo, pasos } = instrucciones();
+  if (await estaInstaladaEnEsteEquipo()) {
+    mostrarDetalle({
+      titulo: "Ya está instalada",
+      icono: "success",
+      contenido: h(
+        "p",
+        {},
+        "Kiosco Pro ya está instalada en este equipo. Abrila desde su ícono: en la PC, en el escritorio o el menú Inicio; en el celular, en la pantalla de inicio.",
+      ),
+    });
+    return;
+  }
+  const { titulo, nota, pasos } = instrucciones();
   mostrarDetalle({
     titulo,
     icono: "info",
-    contenido: h("ol", { class: "pasos-instalar" }, ...pasos.map((p) => h("li", {}, p))),
+    contenido: h(
+      "div",
+      {},
+      nota ? h("p", { class: "nota-instalar" }, nota) : "",
+      h("ol", { class: "pasos-instalar" }, ...pasos.map((p) => h("li", {}, p))),
+    ),
   });
 }
 
@@ -62,6 +102,7 @@ function instrucciones() {
   if (ios) {
     return {
       titulo: "Instalar en iPhone / iPad",
+      nota: "Apple no deja que una página se instale sola con un botón: hay que hacerlo desde el navegador, una sola vez.",
       pasos: [
         "Tocá el botón Compartir (el cuadrado con la flecha hacia arriba). En Chrome está arriba a la derecha.",
         "Bajá y elegí \"Agregar a inicio\" (o \"Agregar a pantalla de inicio\").",
