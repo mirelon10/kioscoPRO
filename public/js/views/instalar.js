@@ -1,59 +1,109 @@
-import { $, h, mostrar } from "../lib/dom.js";
+import { h } from "../lib/dom.js";
 import { mostrarDetalle } from "../ui.js";
 
-// Botón "Instalar app": deja la app como un programa más en la PC o un ícono en el celular
-// (se abre en su propia ventana, sin la barra del navegador). Se oculta si ya está instalada.
-// - Chrome / Edge (PC y Android): el navegador avisa con `beforeinstallprompt` y el botón abre su cartel.
-// - iPhone / iPad: Safari no tiene ese aviso; el botón explica cómo agregarla a la pantalla de inicio.
+// Botones "Instalar app" (en el login y en el menú): dejan la app como un programa más en la PC o
+// un ícono en el celular (se abre en su propia ventana, sin la barra del navegador).
+// - Si el navegador ofrece instalar (`beforeinstallprompt`: Chrome / Edge en PC y Android), el botón
+//   abre su cartel.
+// - Si no (iPhone, Safari, Firefox, o Chrome todavía no lo ofreció), el botón explica cómo hacerlo
+//   desde el menú de ese navegador.
+// Se ocultan si la app ya está abierta como instalada.
 
-const btn = $("btn-instalar");
+const botones = () => document.querySelectorAll(".js-instalar");
 let pedidoInstalacion = null;
 
 const yaInstalada = () =>
   window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
-const esIOS = () =>
-  /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); // iPad con iPadOS 13+
+const mostrarBotones = (visible) => botones().forEach((b) => b.classList.toggle("hidden", !visible));
 
 export function iniciarInstalacion() {
   if (yaInstalada()) return;
 
   window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault(); // en vez del cartel automático, se usa el botón
+    e.preventDefault(); // en vez del cartel automático, se usan los botones
     pedidoInstalacion = e;
-    mostrar(btn, true);
   });
   window.addEventListener("appinstalled", () => {
     pedidoInstalacion = null;
-    mostrar(btn, false);
+    mostrarBotones(false);
   });
 
-  if (esIOS()) mostrar(btn, true);
-  btn.addEventListener("click", instalar);
+  botones().forEach((b) => b.addEventListener("click", instalar));
+  mostrarBotones(true);
 }
 
 async function instalar() {
   if (pedidoInstalacion) {
     const pedido = pedidoInstalacion;
-    // El navegador permite usarlo una sola vez. Si dice que no, el botón vuelve cuando el
-    // navegador lo ofrezca de nuevo (otro beforeinstallprompt).
-    pedidoInstalacion = null;
-    mostrar(btn, false);
+    pedidoInstalacion = null; // el navegador permite usarlo una sola vez
     await pedido.prompt();
     return;
   }
-  if (esIOS()) {
-    mostrarDetalle({
+  const { titulo, pasos } = instrucciones();
+  mostrarDetalle({
+    titulo,
+    icono: "info",
+    contenido: h("ol", { class: "pasos-instalar" }, ...pasos.map((p) => h("li", {}, p))),
+  });
+}
+
+/** Pasos para instalar a mano según el dispositivo y el navegador. */
+function instrucciones() {
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  const edge = /edg\//i.test(ua);
+  const samsung = /samsungbrowser/i.test(ua);
+  const firefox = /firefox|fxios/i.test(ua);
+  const chrome = /chrome|crios/i.test(ua) && !edge && !samsung;
+  const safariMac = !ios && /safari/i.test(ua) && !chrome && !edge && !firefox && /macintosh/i.test(ua);
+
+  if (ios) {
+    return {
       titulo: "Instalar en iPhone / iPad",
-      icono: "info",
-      contenido: h(
-        "ol",
-        { class: "pasos-instalar" },
-        h("li", {}, "Abrí esta página en Safari."),
-        h("li", {}, "Tocá el botón Compartir (el cuadrado con la flecha hacia arriba)."),
-        h("li", {}, "Elegí \"Agregar a inicio\" y tocá \"Agregar\"."),
-      ),
-    });
+      pasos: [
+        "Tocá el botón Compartir (el cuadrado con la flecha hacia arriba). En Chrome está arriba a la derecha.",
+        "Bajá y elegí \"Agregar a inicio\" (o \"Agregar a pantalla de inicio\").",
+        "Tocá \"Agregar\". La app queda con su ícono en la pantalla de inicio.",
+      ],
+    };
   }
+  if (android) {
+    return {
+      titulo: "Instalar en el celular",
+      pasos: samsung
+        ? ["Tocá el menú (☰ abajo a la derecha).", "Elegí \"Agregar página a\" → \"Pantalla de inicio\"."]
+        : firefox
+          ? ["Tocá el menú (⋮).", "Elegí \"Instalar\" o \"Agregar a pantalla de inicio\"."]
+          : [
+              "Tocá el menú (⋮ arriba a la derecha).",
+              "Elegí \"Instalar app\" o \"Agregar a pantalla principal\".",
+              "Confirmá con \"Instalar\". La app queda con su ícono junto a las demás.",
+            ],
+    };
+  }
+  if (safariMac) {
+    return { titulo: "Instalar en la Mac", pasos: ["En el menú Archivo, elegí \"Agregar al Dock\"."] };
+  }
+  if (firefox) {
+    return {
+      titulo: "Firefox no instala apps",
+      pasos: ["Abrí esta misma página en Google Chrome o Microsoft Edge.", "Tocá \"Instalar app\" de nuevo."],
+    };
+  }
+  return {
+    titulo: "Instalar en la PC",
+    pasos: edge
+      ? [
+          "Hacé clic en el menú (··· arriba a la derecha).",
+          "Elegí \"Aplicaciones\" → \"Instalar Kiosco Pro\".",
+          "Queda en el escritorio y en el menú Inicio.",
+        ]
+      : [
+          "Hacé clic en el ícono de instalar que aparece a la derecha de la barra de direcciones (una pantallita con una flecha).",
+          "Si no está: menú (⋮ arriba a la derecha) → \"Transmitir, guardar y compartir\" → \"Instalar página como app\".",
+          "Queda en el escritorio y en el menú Inicio.",
+        ],
+  };
 }
