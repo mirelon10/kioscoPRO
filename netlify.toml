@@ -35,3 +35,9 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# Datos de la app instalable: Netlify no reconoce la extensión .webmanifest.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
