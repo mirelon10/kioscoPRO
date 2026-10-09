@@ -32,6 +32,7 @@ import { iniciarEgresos, cargarEgresos, reiniciarFiltrosEgresos } from "./views/
 import { iniciarAdmin, reiniciarAdmin, abrirAdmin } from "./views/admin.js";
 import { iniciarStock, renderStock, cargarMovimientosStock } from "./views/stock.js";
 import { iniciarUsuarios, cargarUsuarios, pedirClaveNueva } from "./views/usuarios.js";
+import { iniciarInstalacion } from "./views/instalar.js";
 
 /** Secciones que solo ve el admin. */
 const SECCIONES_ADMIN = ["sec-admin", "sec-usuarios"];
@@ -54,6 +55,7 @@ iniciarEgresos();
 iniciarAdmin();
 iniciarStock();
 iniciarUsuarios();
+iniciarInstalacion();
 etiquetarTablasParaCelular();
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {

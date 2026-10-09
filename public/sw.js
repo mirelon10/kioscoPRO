@@ -9,7 +9,7 @@
 // Al agregar un archivo a public/ o cambiar una versión del CDN, actualizá las listas de abajo
 // (tests/unit/sw.test.js lo verifica).
 
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE_APP = `kiosco-app-${VERSION}`;
 const CACHE_CDN = `kiosco-cdn-${VERSION}`;
 const ESPERA_RED_MS = 4000;
@@ -20,6 +20,10 @@ const FIREBASE = "https://www.gstatic.com/firebasejs/12.19.0";
 const ARCHIVOS_APP = [
   "./",
   "css/style.css",
+  "icons/apple-touch-icon.png",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+  "icons/icon-maskable-512.png",
   "js/core/auditoria.js",
   "js/core/caja.js",
   "js/core/egresos.js",
@@ -49,10 +53,12 @@ const ARCHIVOS_APP = [
   "js/views/admin.js",
   "js/views/desglose.js",
   "js/views/egresos.js",
+  "js/views/instalar.js",
   "js/views/pos.js",
   "js/views/stock.js",
   "js/views/turno.js",
   "js/views/usuarios.js",
+  "manifest.webmanifest",
 ];
 
 // SheetJS (exportar a Excel) no se descarga de antemano: pesa casi 1 MB y se guarda la primera vez que se usa.
